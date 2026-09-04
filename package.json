@@ -1,0 +1,21 @@
+{
+  "name": "exobrain",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The self-accumulating knowledge base for AI coding agents",
+  "bin": {
+    "exobrain-mcp": "./src/index.js",
+    "exo": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node tests/e2e.js",
+    "test:storage": "node tests/test-storage.js",
+    "test:adapters": "node tests/test-adapters.js",
+    "test:extractor": "node tests/test-extractor.js",
+    "test:mcp": "node tests/test-mcp-protocol.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0"
+  }
+}

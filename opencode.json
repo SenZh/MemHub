@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "exobrain": {
+      "type": "local",
+      "command": [
+        "node",
+        "D:\\workspace\\v0\\src\\index.js"
+      ],
+      "enabled": true
+    }
+  }
+}
