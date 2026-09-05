@@ -1,8 +1,9 @@
 # ExoBrain 完整架构设计与演进蓝图文档 (System Architecture & Roadmap)
 
-> **版本**：v1.4 (Experience Graph & Industry Benchmark Edition)  
-> **状态**：Approved / Baseline Established  
-> **核心定位**：AI 编程与任务协作的原生知识外脑（免维护、散碎暗知识沉淀、轻量因果图谱、跨场景秒级复用）
+> **版本**：v2.0 (Industry Benchmark Reset & Scope Contraction Edition)
+> **状态**：Approved / Baseline Re-established
+> **核心定位**：AI 编程与任务协作的实操锦囊（Pocket Playbook）——轻量、零外部依赖、不锁工具的项目级/全局级暗知识外脑
+> **v2.0 变更摘要**：基于对 Mem0 v3、Zep/Graphiti、Letta/MemGPT、Basic Memory、mcp-memory-service、claude-mem、claude-code-memory 等业界方案的深度对标，完成三块（提取/存储/读取）逐项差距分析与架构重定向：收缩自研边界、确立"站在开源肩膀上只做差异层"路线、引入全局/项目两级记忆空间、确立 MCP + AGENTS.md 双开放标准集成通道。**明确承认"借宿主算力"模式的结构性天花板并划定其适用边界。**
 
 ---
 
@@ -11,208 +12,483 @@
 ### 1.1 什么是 ExoBrain？（重新定义外脑的灵魂）
 ExoBrain **坚决不做**大而全的项目官方架构文档生成器，也**不做**代码仓库的变更日志（Changelog）管理器——那些本应由 Agent 在项目内部自行完成。
 
-ExoBrain 的唯一使命，是充当开发者与各类 AI Agent（OpenCode、Cursor、Claude Code 等）身后的**【实操经验随身锦囊 / 散碎暗知识蓄水池 (Pocket Playbook)】**：
-- **不求宏大完整，但求零碎可用**；
+ExoBrain 的核心使命，是充当开发者与各类 AI Agent（OpenCode、Cursor、Claude Code、Codex 等任意工具）身后的**【实操经验随身锦囊、长效架构决策与工程暗知识蓄水池 (Engineering Playbook & Memory Vault)】**：
+- **不求宏大完整，但求实用长效**；
 - 专门收录那些**“不大不小、写进官方 Wiki 嫌太碎、不记下来下次遇到又得重新抓瞎”**的实操经验、野路子技巧、特殊参数配方与环境暗坑；
-- 让每一次在某个特定会话、特定项目或赛事中“好不容易跑通的宝贵经验”，沉淀为不可丢失的原子资产。
+- **记录关键架构决策（ADR）与隐性业务规则**：记录“为什么放弃方案 B 选用方案 A”、“老系统为何存在此特异性逻辑”，避免后续迭代或切换 Agent 时引发重大倒退；
+- **支持用户自定义分类扩展**：系统内置基础分类，同时允许开发者/项目方按特定业务需要自定义扩展知识类别与校验模式；
+- **只记有复用价值的高密度知识，拒绝无脑记录工具流水账**；
+- 让每一次在特定会话、特定工程中跑通的宝贵经验与决策，沉淀为不可丢失的原子资产。
 
-### 1.2 解决的三大核心痛点场景
-1. **跨项目 / 跨赛事的“成功经验迁移”（复制成功）**：
-   - 上次在“赛事 A”费尽周折调试通的评测脚本与参数配方，下次在“赛事 B”卡住时，直接让 Agent 调工具查出上次的解法，一秒钟照猫画虎直接跑通。
-2. **工作轨迹与关键改动的“快速回溯盘点”（足迹梳理）**：
-   - 时隔一个月重新打开某个 Workspace，敲一行 `exo list --project <name>`，30 秒快速盘点“我之前在这个项目里到底改了哪些关键逻辑、跑通过哪些尝试”。
-3. **值班排障数字人的“一招制敌”（防重复排查）**：
-   - 数字人作为负责人帮不同人排查问题，一次踩坑排查完自动沉淀，后续任何人遇到相同故障，数字人秒级唤醒卡片给出正解。
+### 1.2 与业界方案的灵魂区别（一句话版）
+
+> **他们做的是“对话录音机与操作流水账”，存的是“刚才执行了什么命令”；我们做的是“工程决策与实操锦囊”，存的是“为什么这么做，以及下次遇到该怎么干”。**
+
+| 维度 | 业界方案们 (claude-mem / memento / basic-memory / Supermemory) | ExoBrain |
+|---|---|---|
+| **提取算力** | 自建繁重提取管道：要配置专属 OpenAI Key / Neo4j / 专属云端服务，或纯手工记录 | **借宿主 Agent 会话算力提炼**（0 key、0 额外开销，直接复用当前已配置环境） |
+| **知识定位** | 离散微观事实 / 工具调用 Observation（命令回显、读文件日志等大量噪声） | **工程长效知识**：排错根因正解（Learnings）+ 架构决策权衡（Decisions）+ 验证模板（Solutions）+ 自定义分类 |
+| **分类扩展** | 硬编码固定类型，或单一无分类笔记 | **Schema 扩展框架**：内置 3 核心分类 + 项目级自定义扩展配置（`categories.json`） |
+| **绑定方式** | 绑定特定 IDE 或私有协议 | **MCP + AGENTS.md 双开放标准**，OpenCode、Cursor、Claude Code 通吃 |
+| **采集策略** | 仅依赖工具拦截（噪声极大）或纯手动（极易荒废） | **双轨制**：交互中主动 `/know` 直通 + **定时离线自动扫描（2小时无更新静默判定）** |
+
+### 1.3 解决的四大核心痛点场景
+1. **疑难排错与避坑资产复现（一次踩坑，全局免疫）**：
+   - 调试通的特殊环境兼容性、底层依赖冲突，沉淀为“现象-根因-正解代码”，下次在任意会话遇到相同报错，Agent 秒级唤醒正解一次性搞定。
+2. **架构决策与隐性规则防倒退（为什么这么做）**：
+   - 记录编码前讨论确认的架构权衡（ADR）与业务潜规则。防止后续会话中 Agent 因缺乏背景“自作聪明”地将关键妥协代码重构成错误形式。
+3. **工作轨迹与全局态势盘点（做过什么与资产统计）**：
+   - 执行 `exo stats`，快速盘点最近在各个项目里攻克了哪些模块、消耗了多少 Token、留下了哪些核心资产。
+4. **跨项目经验迁移与自定义沉淀（定制业务知识库）**：
+   - 项目可通过扩展配置定义专用知识（如 `env_recipes`、`benchmark_tricks`），支持特定赛道或私有业务的高效复用。
 
 ---
 
-## 2. 行业前沿生态对比与护城河 (Industry Benchmark)
+## 2. 业界深度对标与自审 (Industry Benchmark & Self-Review)
 
-针对 GitHub 开源生态（如 `agentmemory`、`ipiton`、`Astrivya`）以及大厂方案（如腾讯最新开源的 `TencentDB-Agent-Memory` v2.0），ExoBrain 的差异化护城河如下：
+> 本章为 v2.0 新增核心章节。调研对象（2026-09 时点）：**Mem0 v3**、**Zep/Graphiti**（arXiv 2501.13956 论文 + 仓库）、**Letta/MemGPT**、**Basic Memory**（basicmachines-co）、**mcp-memory-service**（doobidoo，含 issue #175 混合检索完整实现细节）、**claude-mem**（thedotmack，9.3k stars）、**claude-code-memory**（d2a8k3u）、**claude-code-auto-memory**、**AGENTS.md 标准**（Linux 基金会 AAIF，60k+ 项目采用）、**Claude Code hooks 官方规范**（PreCompact/SessionStart/Stop 等）。
 
-| 对比维度 | 腾讯 TencentDB-Agent-Memory | 常见开源记忆体 (agentmemory / Ruben) | **ExoBrain (我们的方案)** |
+### 2.1 竞争格局总览与全景对标
+
+结合最新调研（覆盖 Mem0 v3、Zep/Graphiti、Basic Memory、mcp-memory-service、claude-mem、Khoj、Memento-MCP、Context-Forge、Supermemory、Cline Memory Bank）：
+
+| 方案 | 核心定位 | 提取与捕获机制 | 存储与组织 | 知识分类体系 | 致命边界与断层 |
+|---|---|---|---|---|---|
+| **claude-mem** | Claude Code 记忆插件 (93k stars) | PostToolUse 钩子拦截每一条工具调用，后台 Worker 异步压缩 | SQLite FTS5 + 可选 Chroma | 固定的 Observation 类型 (decision/bugfix/feature) | 充斥大量命令与工具流水账噪声；Worker 易死锁与内存泄露；OpenCode 插件常年报错 |
+| **Basic Memory** | Markdown 知识库 MCP | 纯依靠用户/Agent 自觉调工具读写 | Markdown + Wikilinks + SQLite 倒排 | 通用 Observation/Relation，无业务结构 | 纯哑记事本，脱离主路径，无自动化提取能力 |
+| **mcp-memory-service** | 持久化记忆中间件 | 靠 Agent 自觉调用或 REST 上报 | SQLite-vec + FTS5 trigram 混合检索，支持遗忘衰减 | 碎片化语义片段 + 因果标签 | 小型通用向量模型对代码架构理解极弱，易产生跨项目语义污染 |
+| **Cline Memory Bank** | 提示词驱动文件规范 | 提示词强制 Agent 维护 `memory-bank/*.md` | 项目根目录下 6~7 个纯 Markdown 文件 | 固化的生命周期文档 (patterns, activeContext) | 开局暴力全量读取引发 **Token 爆炸与卡顿**；依赖 Agent 自律导致文档严重腐化漂移 |
+| **Memento / Context-Forge** | 轻量工程 MCP 插件 | 会话 Prompt 钩子截获 + MCP 显式调用 | 本地 SQLite + FTS5 | 预设固化枚举分类 (decisions, pitfalls, bugs) | 片段极度零碎；不支持业务自定义 Schema 扩展；缺少完整的 ADR 版本演进废弃链 |
+| **Supermemory** | 统一长效记忆云平台 | 会话蒸馏 + 虚拟文件系统 (smfs) | 云端原子事实图谱 (Updates/Extends/Derives) | 动态关系图演化 | **引擎闭源+数据出境**；擅长通用事实，对深层代码排错与因果验证无建模 |
+| **ExoBrain** | **工程暗知识与决策随身外脑** | **双轨制**：主动 `/know` + 定时离线自动扫描（2小时无更新静默判定），借宿主算力萃取 | **Markdown 真理源 + SQLite FTS5 加速视图 + L1-L3 渐进披露** | **可扩展核心三元组 + 用户自定义 Schema 框架** | **专注工程决策与实操正解，杜绝操作流水账，零额外依赖与零 API Key** |
+
+### 2.2 逐方案需求满足度核对（对照我们需求硬性清单）
+
+| 我们的需求 | Mem0 | Zep | Letta | mcp-memory-service | Basic Memory | claude-mem |
+|---|---|---|---|---|---|---|
+| 零外部模型/API key | ❌ 要 OpenAI | ❌ 要 LLM+图库 | ❌ 要 embedding | ✅ 本地 ONNX | ✅ | ❌ 自建 worker |
+| Markdown 真理源/可 Git | ❌ 向量库 | ❌ 图库 | ❌ | ❌ SQLite 为主 | ✅✅ 最强 | ❌ |
+| 跨工具通吃 | SDK 嵌入 | SDK 嵌入 | 要托管整个 agent | ✅ 25+ 工具 | ✅ MCP | ❌ 锁 Claude Code |
+| 实操知识结构化模板（现象/根因/正解） | ❌ 平文本事实 | ❌ 实体图 | ❌ | ❌ 自由文本+tags | ⚠️ 有结构但通用 | ⚠️ observation 非领域化 |
+| 自动提炼（免手动录入） | ✅ 但要 key | ✅ 但要 key | ✅ 但要接管 agent | ❌ 靠 agent 自觉 | ❌ 靠 agent 自觉 | ✅ 但锁 Claude Code |
+| 凭据脱敏管道 | ⚠️ 文档建议 | ❌ | ❌ | ❌ | ❌ | ❌ |
+| 轻量（无 Python/无服务端） | ❌ | ❌ | ❌ | ❌ Python+模型下载 | ❌ Python | ❌ Bun+Chroma+uv |
+
+**核对结论**：每一家都满足几条、缺几条，而"缺的那几条"恰好拼不出我们的完整需求。这是项目立项合理性的来源——但合理性只覆盖"提炼管道 + 领域模型"这一小块，**不覆盖存储引擎与检索实现**（v1.4 时期我们在这两块重复造了轮子）。
+
+### 2.3 价值密度哲学（v2.0 确立，有业界共识背书）
+
+**"只记有价值的，不什么都记"是被踩坑验证的方向，不是任性**：
+- claude-mem / memento 走"全记录"路线（每次工具调用都存 observation），用户抱怨最多的恰恰是**记忆膨胀与噪声**；
+- mcp-memory-service 后来被迫补建"遗忘机制"（衰减/压缩/归档）——全记录方案的宿命是亡羊补牢地造遗忘管道；
+- Claude Code 官方 auto-memory 硬限 MEMORY.md 200 行、25KB，并建议"30 天没复现的条目删除"——连官方都在克制记录量。
+
+**先想清楚记什么 > 先都记了再想着忘**。且"借宿主算力"恰好强化了这一点：**宿主 agent 在会话内拥有一手上下文（工具调用、代码理解、任务意图），它比任何会话外的二手提取管道都更清楚什么值得记**。
+
+### 2.4 自审发现的实证缺陷（v1.4 → v2.0 必须修复）
+
+| # | 缺陷 | 证据 | 严重级 |
 |---|---|---|---|
-| **核心定位** | **企业级记忆中台**（偏中后台管控与多团队共享） | **全量对话向量切片**（什么都记的录音笔） | **个人/Agent 实操经验便签本**（专记暗知识与避坑） |
-| **接入机制** | **流量代理劫持 (Proxy 模式)**<br>必须把 Agent 的 `baseURL` 改为腾讯网关。 | **工具严重过载**<br>暴露 **53~54 个工具**，严重造成模型注意力崩溃与 Token 浪费。 | **极简标准 MCP (stdio 直通)**<br>**仅 4 个原子工具**，即插即用，0 端口占用，0 网络流量劫持。 |
-| **算力与配置** | 强依赖外部 Embedding 接口与腾讯云向量库 TCVDB。 | 逼用户额外配 OpenAI Key，或本地硬编译 `llama.cpp` + Qdrant 向量库。 | **绝对 0 外置大模型配置**<br>借用宿主当前会话算力，吃满 **Prompt Cache（近乎免费）**。 |
-| **存储透明度** | 专有数据库与网关内部格式。 | 向量索引深渊（人类不可读）。 | **纯 Markdown (真理源) + SQLite FTS5 (加速视图)**<br>文件直接可看可改，随时 Git 同步。 |
-| **知识组织** | 复杂的 CodeGraph (AST语法树) 与企业级 Wiki。 | 扁平切片碎片。 | **原子实操卡片 + 轻量因果实体图谱 (Triples)**。 |
+| D1 | **无去重管道** | 本地库实证：SpringSecurity6 卡片重复存储两份（`kb-b0b96c16` / `kb-2538bd82`，同标题同标签） | P0 |
+| D2 | **知识地图静态注入、双份人工维护** | `.cursor/rules/exobrain-map.mdc` 与 `.opencode/knowledge-map.xml` 需人肉同步，必然过时——恰是需求文档自己批判的"录入负担" | P0 |
+| D3 | **检索天花板**：纯 FTS5 trigram 查 <3 字符失效；同义改写 miss（卡片写"动态库缺失"、搜"grpcio 报错"结果为 0） | 架构文档 v1.4 §6.1 自举的反例；mcp-memory-service issue #175 实测纯向量对精确匹配仅 60-70% 命中、混合后近 100% | P1 |
+| D4 | **沉淀覆盖率靠人**：无 hooks 自动兜底，忘 `/know` = 流失 | claude-mem 全自动方案对比；Claude Code issue #17237 证实 PreCompact 是结构化数据被压缩毁掉前的最后抢救时机 | P1 |
+| D5 | **无遗忘/衰减机制**：一年后老坑过时权重不降 | mcp-memory-service consolidation 对比 | P2 |
+| D6 | **项目隔离只存在于 roadmap**：代码无 workspaces 层 | 用户核心诉求"项目 A 的记忆只在项目 A 用"，绝大多数业务知识不跨项目 | P0 |
+| D7 | **文档与实现漂移**：v1.4 §6 因果图谱宣称"已落地"实为零代码；§8 声称模块在 `src/core/` 实际平铺于 `src/` | grep 验证零痕迹 | P0（诚实性） |
+
+### 2.5 对标后的战略裁决
+
+**三条路线曾摆上桌面**：
+- 路线 A（放弃自研，改用 mcp-memory-service / Basic Memory）：接受 Python 环境、放弃 Markdown 真理源或检索能力二选一、丢失领域模板——**否决**，因为用户核心诉求（价值密度 + 两级隔离 + 借宿主算力）无法全部满足；
+- 路线 B（收缩边界，站在开源肩膀上只做差异层）：**采纳**；
+- 路线 C（维持 v1.4 全自研）：在检索/注入/遗忘上重复造别人造得更好的轮子，而真正的差异部分反而停留在纸面——**否决**。
+
+**路线 B 的分工边界**（哪些用开源验证过的方案、哪些自研）：
+
+| 层 | 决策 | 依据 |
+|---|---|---|
+| 存储格式 | **采用 Basic Memory 已验证的 Entity/Observation/Relation + wikilinks 语法** | Obsidian 图谱白嫖、格式零设计成本、与"SQLite 索引可重建"自愈原则同构 |
+| 混合检索 | **抄 mcp-memory-service 方案**（FTS5 trigram + 可选本地向量，0.3/0.7 加权融合） | issue #175 公开了完整实现、归一化公式、CJK 踩坑细节 |
+| 被动注入 | **走 AGENTS.md 开放标准**（Linux 基金会 AAIF，60k+ 项目，25+ agent 原生读取） | 取代双份人工维护的注入文件 |
+| 借宿主算力的提炼管道（`/know` + hooks 探测） | **自研**（全行业空白） | 我们的核心差异 |
+| 现象/根因/正解领域 schema + 三分类 | **自研**（全行业空白） | 我们的核心差异 |
+| 凭据脱敏管道 | **自研**（业界普遍缺失） | 我们的核心差异 |
 
 ---
 
-## 3. 系统四层解耦架构 (Layered Architecture)
+## 3. 系统分层架构 (Layered Architecture, v2.0 修订)
 
-系统严格按照工业级 4 层解耦模型设计，各层职责单一、单测独立、可插拔扩展：
+v1.4 的四层解耦保留，但**各层职责重新划定**（修订处以 ⭐ 标注）：
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ Layer 4: 接口协议与呈现层 (Interfaces)                                   │
-│  - Stdio MCP Server (exo_record/search/get/list)                        │
-│  - 开发者终端 CLI (exo find/get/list/scan/rebuild)                     │
+│  - Stdio MCP Server (exo_record/search/get/list/map) ⭐新增 map         │
+│  - 开发者终端 CLI (exo find/get/list/scan/rebuild/map) ⭐新增 map        │
+│  - AGENTS.md 动态知识地图生成器 ⭐取代 .mdc/.xml 双份静态注入            │
 └────────────────────────────────────┬────────────────────────────────────┘
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ Layer 3: 提炼与调度管道层 (Pipeline & Consolidation)                    │
-│  - KnowledgeExtractor: 领域启发式与特征提炼引擎 (过滤闲聊、构建卡片)     │
-│  - ScannerService: 离线会话调度器与 session_tracking 状态机控制         │
+│  - KnowledgeExtractor: 领域启发式提炼 (保留)                            │
+│  - ScannerService: 离线会话调度器与状态机 (保留)                        │
+│  - DedupPipeline ⭐新增: 标题哈希精确去重 + FTS5 前置查重               │
+│  - HooksProbe ⭐新增: 能力探测式自动提取 (检测到 hooks 则挂, 否则降级)   │
 └────────────────────────────────────┬────────────────────────────────────┘
                                      ▼
-┌────────────────────────────────────┴────────────────────────────────────┐
-│ Layer 2: 宿主适配器层 (Agent Adapters)                                  │
-│  - AgentAdapter 抽象基类 (定义 isAvailable, scan, readContext 契约)     │
-│  - OpenCodeAdapter (本地 opencode.db 扫描与消息提取)                    │
-│  - CursorAdapter (workspaceStorage 探测与状态插槽)                       │
-│  - AdapterRegistry (适配器注册中心与活跃 Session 自动推导)              │
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Layer 2: 数据源适配器层 (Data Source Adapters) ⭐职责收缩               │
+│  - AgentAdapter 抽象基类 (保留, 但定位变更: 只做离线扫描的数据源)        │
+│  - OpenCodeAdapter / CursorAdapter (保留)                              │
+│  - 集成通道收敛: MCP + AGENTS.md 双开放标准 (不再为每个 agent 写适配器)  │
 └────────────────────────────────────┬────────────────────────────────────┘
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ Layer 1: 基础设施与存储层 (Core & Infrastructure)                       │
-│  - StorageEngine: SQLite FTS5 (Trigram) + Markdown 原子双写管道         │
-│  - Scrubber: 敏感凭据脱敏管道 (Secret Scrubbing)                        │
+│  - StorageEngine: Markdown 真理源 (Basic Memory 语法) + SQLite FTS5     │
+│  - ⭐可选本地向量层: ONNX 运行时 (384 维 MiniLM 级, CPU 毫秒级, 0 key)  │
+│  - ⭐两级空间: 全局层 + 项目层 (workspaces/<project>/)                  │
+│  - Scrubber: 敏感凭据脱敏管道 (保留)                                    │
 │  - Config: 跨平台路径解析 (~/.exobrain/)                                │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
----
+**关键架构变更说明**：
 
-## 4. 双轨知识获取运行机制
+1. **⭐ Layer 2 重新定位**：从"宿主适配器层"收缩为"数据源适配器层"。它的职责只剩离线扫描兜底（读 opencode.db、读 state.vscdb），**不再是集成通道**。集成通道统一收敛到 MCP（读写能力，所有主流 agent 原生支持）+ AGENTS.md（被动注入，25+ agent 原生读取，Claude Code 用 `CLAUDE.md` 首行 `@AGENTS.md` 一行桥接）。"支持新 agent"的成本从"写一个 Adapter"降为"零成本或写一个生成模板"。
 
-### 4.1 主动直通机制（核心主路径：RPC 内存直通）
-- **触发入口**：用户在任何支持 MCP 的 Agent 中输入 `/know`、`/save` 或说“记录一下刚才跑通的参数/踩坑”。
-- **模型推理**：宿主 Agent 基于当前受热的完整会话上下文，提炼出 25 字标准标题与结构化卡片参数。
-- **安全脱敏管道 (Secret Scrubbing)**：
-  MCP Server 收到参数后，**强制经过正则脱敏器**（清洗常见 AK/SK、JWT、Bearer Token、私钥、密码），替换为 `***REDACTED***`。
-- **协议入库**：直接以原子方式落盘 Markdown 并写入 SQLite FTS5 索引，返回 `{ success: true, id: "kb-xxxx" }`，耗时 <10ms，**坚决不读 IDE 本地数据库，绝对安全稳定**。
+2. **⭐ 双开放标准集成通道**：
 
-### 4.2 被动离线增量扫描（安全兜底路径）
-- **防 Fork 炸弹隔离**：扫描 SQL 强制排除 `parent_id IS NOT NULL` 与特定前缀，绝不递归提炼派生会话。
-- **状态机与悲观锁**：`session_tracking` 维护 `PENDING` $\rightarrow$ `EXTRACTING` $\rightarrow$ `EXTRACTED` / `SKIPPED` / `FAILED`，带 180s 租约锁，保证单会话只处理一次，支持随时重跑与增量顺延。
-- **进程树治理**：对无头回唤进程引入 120 秒硬超时和 `taskkill /T /F` 级联清理，杜绝 Windows 孤儿进程与端口泄漏。
-
----
-
-## 5. 存储模型与物理契约 (Storage Design)
-
-### 5.1 物理目录布局 (`~/.exobrain/`)
 ```text
-~/.exobrain/
-├── config.json                     # 全局配置
-├── index.db                        # SQLite 数据库（WAL 模式，元数据、FTS5、图谱、状态机）
-└── vault/                          # 知识真理唯一来源 (Markdown 纯文本，Git-Ready)
-    ├── learnings/                  # 避坑指南与排错经验 (kb-<id>.md)
-    ├── decisions/                  # 架构与设计决策 (kb-<id>.md)
-    └── solutions/                  # 通用方案与模板代码 (kb-<id>.md)
+                 ┌─ 通道 A: MCP 协议（读写能力）────────────────┐
+                 │ Claude Code / Cursor / Codex / OpenCode /    │
+                 │ Windsurf / 任意新 agent —— 全部原生支持       │
+                 │                                              │
+任何 Agent ──────┤                                              │
+                 │                                              │
+                 └─ 通道 B: AGENTS.md（被动注入）────────────────┘
+                 │ Linux 基金会 AAIF 开放标准, 25+ agent 原生读取 │
+                 │ Claude Code 用 CLAUDE.md 首行 @AGENTS.md 桥接 │
+                 └──────────────────────────────────────────────┘
+
+  可选增强（有则用、无则降级, 绝不依赖）：
+  Claude Code hooks / OpenCode events → 自动提取 + SessionStart 动态注入
 ```
 
-### 5.2 存储加速层与并发防御 (`index.db`)
-- SQLite 强制启用 `PRAGMA journal_mode = WAL;` 与 `PRAGMA busy_timeout = 5000;`，彻底避免多进程 `SQLITE_BUSY` 锁死。
-- `knowledge_fts` 采用 **`trigram` (三元分词器)**，原生支持中文无空格分词、英文实体词与代码段混合的高速 BM25 检索。
+3. **⭐ 自研收缩承诺**：自研部分从 v1.4 的"全栈"收缩为三件全行业空白：借宿主算力的提炼管道、领域 schema、脱敏管道。**预计代码量约为 v1.4 设想的三分之一**。
 
 ---
 
-## 6. 前沿扩展：轻量级实操因果知识图谱 (Experience Graph)
+## 4. 双轨知识获取运行机制 (v2.0 修订)
 
-> **设计宗旨**：不做沉重复杂的代码 AST 语法树分析，专注沉淀**“技术环境、报错现象、关键参数与解法的因果关联网络”**。让 Agent 具备“顺藤摸瓜”的多跳推理能力。
+### 4.1 主动直通机制（核心主路径，保留并强化）
+- **触发入口**：用户在任何支持 MCP 的 Agent 中输入 `/know`、`/save` 或说"记录一下刚才跑通的参数/踩坑"。
+- **模型推理**：宿主 Agent 基于当前受热的完整会话上下文，提炼出 25 字标准标题与结构化卡片参数。宿主 agent 拥有一手上下文（工具调用、代码理解、任务意图），比任何会话外二手提取管道更清楚什么值得记——这是"借宿主算力"模式的质量优势来源。
+- **⭐ 去重管道（D1 修复）**：MCP Server 落库前强制执行：
+  1. 标题+分类哈希精确去重；
+  2. FTS5 前置查重（近同义命中则返回已有卡片 ID，提示 agent 走版本更新而非重复插入）；
+  3. 冲突路径：新卡片入库时同实体+同问题域检测，命中则旧卡片自动写入 `superseded_by` 关闭版本窗口，检索默认只召回"当前有效"版本（简化版 Graphiti bi-temporal 模型）。
+- **安全脱敏管道 (Secret Scrubbing)**：强制经过正则脱敏器（清洗常见 AK/SK、JWT、Bearer Token、私钥、密码），替换为 `***REDACTED***`。
+- **协议入库**：原子方式落盘 Markdown 并写入 SQLite FTS5 索引，返回 `{ success: true, id: "kb-xxxx" }`，耗时 <10ms，坚决不读 IDE 本地数据库。
 
-### 6.1 为什么需要实操知识图谱？（多跳因果联想）
-- **单点全文检索的局限**：
-  若历史卡片记录的是 `Alpine 下缺少 glibc 导致 sharp 报错，正解是安装 libc6-compat`。
-  当新项目里用 Alpine 跑 `grpcio` 遇到动态库报错时，搜 `grpcio` 全文检索结果为 0，依然重新踩坑。
-- **因果图谱的破局**：
-  通过三元组边关系：`[grpcio] -(依赖)-> [glibc] <-(缺少)- [Alpine] -(安装解决)-> [libc6-compat]`。
-  Agent 顺着图谱 2 跳（2-Hop）关联，即便从未记录过 `grpcio`，也能瞬间发现根因在于 Alpine 缺少 glibc，并直接给出安装 `libc6-compat` 的正解！
+### 4.2 双轨知识获取运行机制 (v2.0 修订)
 
-### 6.2 零外部依赖的 SQLite 图存储契约
-坚决拒绝引入 Neo4j 等独立图数据库，直接在本地 `~/.exobrain/index.db` 内建轻量图拓扑表：
+#### 1. 主动直通机制（高价值即时落盘，核心主路径）
+- **触发入口**：用户在任何支持 MCP 的 Agent（OpenCode、Cursor、Claude Code）中输入 `/know`、`/save` 或说“记录刚才的架构决策/排错经验”。
+- **模型推理**：宿主 Agent 基于当前受热的完整会话上下文，提炼出符合 Schema（内置三元组或用户自定义分类）的标准结构。
+- **⭐ 去重与版本演进管道**：
+  1. 标题哈希精确去重与 FTS5 前置查重；
+  2. 显式版本废弃（`supersedes`）：新决策入库时可指定替代旧卡片 ID，旧卡片自动写入 `superseded_by` 并关闭版本窗口，检索默认只召回有效版本。
+- **协议入库**：原子落盘 Markdown 并更新 SQLite FTS5 索引，耗时 <10ms。
+
+#### 2. 定时离线自动扫描与萃取机制（两小时无更新规则）
+- **核心判定哲学**：开发者在沉浸式解决问题时，极易忘记手动输入 `/know`。系统提供后台扫描守护器（可通过系统定时任务或 CLI `exo scan` 驱动）。
+- **完成态判定准则**：
+  - 会话必须为根任务（排除派生/子任务递归）；
+  - 会话最后活跃更新时间已超过 2 小时（`time_updated < now - 2h`），此时断定开发者已结束本次工作或切换了任务；
+  - 过滤已处理会话（`session_id NOT IN session_tracking`）。
+- **针对 OpenCode 的离线抽取实现**：
+  - 直接以 WAL 只读协议安全查询 `opencode.db`；
+  - 调用 `opencode export <session_id> --sanitize` 抽取时序消息与工具调用；
+  - 复用宿主环境当前配置的模型进行单轮轻量归纳提炼。
+- **针对 Cursor 的离线抽取实现**：
+  - 以只读且不加锁协议（`?mode=ro&immutable=1`）连接 `%APPDATA%\Cursor\User\globalStorage\state.vscdb`；
+  - 穿透 `composer.composerHeaders` 找到目标工程的会话索引；
+  - 按照 `composerData` 中的 `bubbleId` 列表，读取 `cursorDiskKV` 还原包含 User Prompt、Reasoning（思考过程）、Assistant 响应与工具调用的完整轨迹；
+  - 提交给宿主模型提炼。
+- **状态机与防死循环防御**：
+  - 在 `session_tracking` 表中严格记录 `session_id`, `source`, `status` (`EXTRACTED` / `SKIPPED_NO_VALUE` / `FAILED`), `time_processed`；
+  - 凡是无代码修改、纯闲聊会话，前置规则直接打标 `SKIPPED_NO_VALUE`，坚决不浪费模型算力。
+
+---
+
+## 5. 知识分类与自定义扩展架构 (Custom Schema Extension)
+
+系统内置三大核心工程知识分类，同时提供**项目级与全局级的分类扩展框架**，以支持不同技术团队沉淀特定领域的长效认知：
+
+### 5.1 内置三大基石分类规范
+
+1. **`learnings`（排错与避坑指南）**：
+   - 必须要素：【现象与报错特征】、【根本原因深度剖析】、【经过验证的正解（代码/配置）】、【关联代码文件】。
+2. **`decisions`（架构决策与业务隐性规则 / ADR）**：
+   - 必须要素：【业务背景与技术痛点】、【评估过的备选方案（为什么放弃方案 B）】、【最终裁决】、【妥协代价与隐性约束契约】。
+3. **`solutions`（技术方案与可复用脚手架）**：
+   - 必须要素：【适用场景】、【核心设计思路】、【完整可运行代码模板/配置配方】。
+
+### 5.2 自定义分类扩展机制 (Custom Schema)
+
+用户可在项目根目录 `.exobrain/categories.json` 或全局 `~/.exobrain/categories.json` 中扩展自定义知识类型。例如增加“业务隐性规则”与“赛事优化配方”：
+
+```json
+{
+  "version": "1.0",
+  "categories": {
+    "business_rules": {
+      "name": "业务隐性规则",
+      "description": "老系统兼容逻辑、特定错误码降级约定、非直观的业务潜规则",
+      "fields": [
+        { "name": "rule_key", "type": "string", "required": true, "description": "规则标识或错误码" },
+        { "name": "business_context", "type": "string", "required": true, "description": "为什么存在该规则（历史包袱或业务背景）" },
+        { "name": "constraint_logic", "type": "string", "required": true, "description": "具体必须遵守的代码约束逻辑" }
+      ],
+      "template": "## 规则背景\n{{business_context}}\n\n## 约束与降级逻辑\n{{constraint_logic}}"
+    },
+    "env_recipes": {
+      "name": "特殊环境与调优配方",
+      "description": "跨机环境配置、特定显卡/依赖底层编译参数、评测调优 Tricks",
+      "fields": [
+        { "name": "target_env", "type": "string", "required": true, "description": "操作系统/GPU/硬件架构" },
+        { "name": "recipe_commands", "type": "string", "required": true, "description": "可执行的配置命令或参数组合" }
+      ],
+      "template": "## 目标环境\n{{target_env}}\n\n## 经过跑通的完整配置步骤\n{{recipe_commands}}"
+    }
+  }
+}
+```
+
+- **运行时自适应**：
+  - MCP 工具 `exo_record_knowledge` 的入参动态兼容所有在 `categories.json` 中声明的合法 `category`；
+  - 存储层自动在 Markdown 文件中按指定模板渲染，并在 SQLite 中建立分类索引；
+  - CLI `exo list --category <type>` 和检索接口自动支持按自定义分类多维筛选。
+
+### 4.3 ⭐ hooks 能力探测式自动提取（新增，可选增强层）
+- **设计原则：有则用、无则降级，绝不构成依赖**。因为 Cursor、Codex 等没有等价 hooks 机制，这保证了跨工具通用性底线。
+- 检测到 Claude Code 环境 → 挂载 `Stop`（turn 结束触发提炼建议）、`SessionEnd`、`PreCompact`（上下文压缩毁掉结构化数据前的最后抢救时机，Claude Code issue #17237 证实该痛点）。
+- 检测到 OpenCode events → 挂载等价事件。
+- 检测不到任何 hooks → 降级为现状（`/know` 手动 + 离线扫描兜底），功能完整可用。
+- hooks 触发的提炼依然是**借宿主算力**：hook 只做信号收集与触发，不做本地推理。
+
+### 4.4 ⭐ 沉淀漏斗分级（新增设计）
+- 不是所有内容都值得 300-800 字 L2 卡片。引入轻量 observation 层（claude-mem 模式）：低价值信号只留一行索引，会话结束再由 agent 判断是否升级为完整卡片——"广撒网、深提炼"。
+- 升级判断由宿主 agent 执行（`/know` 或 hooks Stop 事件），维持哑 server 原则。
+
+---
+
+## 5. 存储模型、归档流水线与渐进式契约 (Storage, Archive & Disclosure Design)
+
+### 5.1 存储选型裁决：为什么摒弃散落 Markdown，确立单文件 SQLite 内核？
+
+业界工业级实践（`claude-mem`、`memento-mcp`、`mcp-memory-service`）表明：
+- **散碎 Markdown 文件的工程缺陷**：当记忆卡片积累至数百上千条时，多文件 I/O 极其低效；多个 Agent 或并发任务写入时极易发生文本写撕裂；全文检索必须依赖外部工具或临时建立内存缓存，带来一致性维护成本。
+- **单文件 SQLite 核心的压倒性优势**：
+  1. **严格的 ACID 事务一致性**：WAL 模式下并发读写绝不锁库，写入毫秒级确认；
+  2. **多维倒排一体化**：元数据字段、FTS5 全文倒排虚拟表、向量字段集中存储在单个物理文件中；
+  3. **零环境门槛**：纯本地单文件，免除外部数据库或服务守护开销。
+
+> **人类可读性解决方案（按需导出）**：
+> SQLite 充当运行期的高性能核心真理源；通过 `exo export --format markdown`，随时可将数据库导出为格式优雅的 Obsidian / Git 风格的 Markdown 树。
+
+---
+
+### 5.2 核心物理表结构与存读一体设计
 
 ```sql
--- 1. 实体表 (Entity Node)
-CREATE TABLE IF NOT EXISTS graph_entities (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,          -- 如: "Alpine", "glibc", "libc6-compat", "HTTP-403"
-    entity_type TEXT NOT NULL           -- "env" | "lib" | "error" | "solution" | "param"
+-- 1. 核心知识条目表（存读一体、物理分层设计）
+CREATE TABLE IF NOT EXISTS knowledge_items (
+    id TEXT PRIMARY KEY,               -- 唯一标识: 'kb-c3ffcbe1'
+    project TEXT NOT NULL,            -- 命名空间: 'global' 或工程 slug ('my-backend')
+    category TEXT NOT NULL,           -- 内置: 'learnings', 'decisions', 'solutions', 或自定义分类
+    
+    -- 【L1：第一步检索层数据，极低 Token 消耗】
+    title TEXT NOT NULL,              -- 规范化高密度标题: [技术栈/模块] 核心场景 最终正解
+    summary TEXT NOT NULL,            -- 100字以内现象与根因极简摘要
+    tags TEXT NOT NULL,               -- JSON 数组: ["docker", "alpine", "glibc"]
+    related_files TEXT,               -- JSON 数组: ["Dockerfile", "package.json"]
+    
+    -- 【L2/L3：第二步按需展开详情层数据，大文本】
+    root_cause TEXT,                  -- 深入技术根因深度剖析
+    solution_core TEXT NOT NULL,      -- 核心改动原则与思路
+    code_payload TEXT,                -- 完整可运行代码块、配置文本、补丁
+    
+    -- 元数据与演进关系
+    session_id TEXT,                  -- 溯源 Session ID
+    superseded_by TEXT,               -- 若被新版本取代，记录新卡片 ID
+    supersedes TEXT,                  -- 替代了哪条历史卡片
+    access_count INTEGER DEFAULT 0,   -- 访问与命中频次
+    time_created INTEGER NOT NULL,
+    time_updated INTEGER NOT NULL
 );
 
--- 2. 因果边表 (Directed Relation Edge)
-CREATE TABLE IF NOT EXISTS graph_relations (
-    source_id TEXT NOT NULL,
-    relation_type TEXT NOT NULL,        -- "lacks" | "depends_on" | "solves" | "conflicts_with"
-    target_id TEXT NOT NULL,
-    card_id TEXT NOT NULL,              -- 关联回 Markdown 知识卡片
-    PRIMARY KEY (source_id, relation_type, target_id, card_id)
+-- 2. 全文检索倒排虚拟表 (FTS5 Trigram Tokenizer)
+CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+    id UNINDEXED,
+    title,
+    tags,
+    summary,
+    solution_core,
+    tokenize='trigram'
+);
+
+-- 3. 离线会话扫描状态机（防止死循环与重复扫描）
+CREATE TABLE IF NOT EXISTS session_tracking (
+    session_id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,             -- 'opencode' | 'cursor'
+    project TEXT NOT NULL,
+    status TEXT NOT NULL,             -- 'EXTRACTED' | 'SKIPPED_NO_VALUE' | 'FAILED'
+    extracted_kb_ids TEXT,            -- 提取出的卡片 ID 列表 (JSON)
+    time_processed INTEGER NOT NULL
 );
 ```
-
-### 6.3 递归图遍历与多跳唤醒 (Multi-hop Recall via Recursive CTE)
-利用 SQLite 原生内置的 `WITH RECURSIVE` 递归公用表表达式，在 **0.5 毫秒内**完成深度为 2~3 跳的因果网络查询：
-
-```sql
-WITH RECURSIVE graph_walk(current_id, depth, path) AS (
-    SELECT id, 0, name FROM graph_entities WHERE name = :seed_entity
-    UNION ALL
-    SELECT r.target_id, gw.depth + 1, gw.path || ' -> ' || r.relation_type || ' -> ' || e.name
-    FROM graph_relations r
-    JOIN graph_walk gw ON r.source_id = gw.current_id
-    JOIN graph_entities e ON r.target_id = e.id
-    WHERE gw.depth < 2
-)
-SELECT DISTINCT path FROM graph_walk;
-```
-
-### 6.4 双向双链语法兼容 ([[WikiLinks]] / Obsidian 兼容)
-在 Markdown 卡片正文与 Frontmatter 中原生支持双链：
-```markdown
-## 根本原因
-[[Alpine]] 基础镜像基于 musl libc，而预编译的 [[sharp]] 依赖 [[glibc]]。
-
-## 经过验证的正解
-安装 [[libc6-compat]] 解决动态链接缺失。
-```
-- **人类可读**：用 Obsidian 打开 `~/.exobrain/vault/` 直接呈现震撼的知识星空连线图；
-- **机器解析**：正则提取 `\[\[(.*?)\]\]` 自动沉淀为图谱节点，零额外解析开销。
 
 ---
 
-## 7. 后期展望与演进路线图 (Roadmap)
+### 5.3 归档存储机制：无损热备份与极高压缩比冷存储
 
-在当前 MVP 完备验证的基础上，ExoBrain 下一阶段演进规划如下：
-
-### 7.1 规划一：轻量因果图谱引擎落地 (Experience Graph Engine)
-- 在 MCP 中扩展 `exo_explore_graph(entity, max_hops)` 工具；
-- CLI 增加 `exo graph <entity>` 命令，以字符 ASCII 树直接打印实操因果拓扑；
-- 实体同义词归一化（如 `nodejs` 与 `node.js` 自动映射同一节点）。
-
-### 7.2 规划二：两级空间与开放自定义分类 (Workspace $\rightarrow$ Custom Taxonomy)
-- **L1 项目工作区隔离**：自动根据 session 物理目录映射到 `workspaces/<project_name>/`；
-- **L2 开放分类与三层决策漏斗**：
-  1. *用户显式指定*：用户说“/know 归类到赛事技巧”，100% 遵从；
-  2. *项目配置覆盖*：工程根目录支持 `.exobrain.json`，自定义分类清单（如：*赛事技巧、参数配方、环境暗坑、接口联调*）；
-  3. *Agent 语义分诊*：默认由 Agent 识别内容属性自动分流。
-
-### 7.3 规划三：知识跨机漫游 (Git-Backed Vault Sync)
-- 借鉴 `spolom/memory-mcp` 的 Git 同步精髓；
-- 将 `~/.exobrain/vault/` 自身作为本地 Git 仓库，提供 `exo sync` 自动 `git pull --rebase` 与 `git push`，办公室台式机与笔记本无缝同步。
-
-### 7.4 规划四：时间半衰期与常青标记 (Temporal Decay & Evergreen)
-- 借鉴 `adamrdrew/agent-memory-mcp` 的衰减算法；
-- 排错经验随时间自动衰减（半衰期设为 30 天，老旧环境问题检索权重自动后移）；
-- 关键成功经验与核心参数配方支持打上 `evergreen: true`，永久锁定最高召回优先级。
-
-### 7.5 规划五：工作轨迹轻量盘点与案卷报表 (Workplace Ledger & Digest)
-- 提供 `exo export --project <name> --format table`，一键在终端输出该项目沉淀的实操足迹；
-- 支持导出为 CSV 格式，作为团队排错案例库（Issue Registry）进行复盘分析。
+针对开发者对“电脑本地运行一段时间后进行冷备归档”的核心需求：
+1. **在线热备（`VACUUM INTO` 零停机备份）**：
+   SQLite 原生支持热备份命令。即使当前正在进行高频读写，系统依然可以瞬时生成一份数据紧凑、WAL 缓存已完全合流的独立只读镜像：
+   ```sql
+   VACUUM INTO '/backups/exobrain_archive_20260905.db';
+   ```
+2. **高效压缩与随手迁移**：
+   SQLite 格式的数据页具备极高压缩比。结合 `zstd` / `gzip` 压缩，归档文件体积通常缩减 80% 以上。开发者可直接单文件打包同步至企业网盘、私有对象存储或冷备目录。
 
 ---
 
-## 8. 当前工程交付资产与质量基线
+### 5.4 渐进式披露（Progressive Disclosure）两阶段交互流
 
-当前仓库已全部完成工程落地与提交：
-- **核心模块**：
-  - `src/core/`：存储、配置与脱敏管道
-  - `src/adapters/`：多态适配器层（OpenCode 已实战验证，Cursor 已提供插槽）
-  - `src/pipeline/`：知识萃取与离线扫描调度服务
-  - `src/interfaces/`：Stdio MCP Server 与开发者终端 CLI
-- **自动化测试套件**：
-  - `npm test`：包含 Layer 1~Layer 4 的 4 个独立单元测试与 E2E 连通性测试，**100% 绿灯通过**。
-- **真实数据验证**：
-  - 本地知识库已真实收录包括本工程故障修复、本地网关图像生成、Go 编译产物处理、充值账本设计等多篇真实沉淀资产，可随时查阅。
+彻底避免传统 RAG 一次性返回数千字代码导致 Context Window 爆炸与模型“Attention Lost in the Middle”：
+
+```
+                Agent 发起排错/决策检索
+                           │
+                           ▼
+  [第一步：检索 L1 索引] exo_search_knowledge(query="...")
+                           │
+                           ▼
+  返回极简 JSON（单条约 30~50 Tokens）：
+  - id, title, summary, tags, related_files
+  - 伴随显式 instruction 指导：“如需完整代码请根据 ID 调用 exo_get_knowledge”
+                           │
+                           ▼ Agent 判断某条索引高度吻合当前上下文
+  [第二步：展开 L2/L3 详文] exo_get_knowledge(ids=["kb-c3ffcbe1"])
+                           │
+                           ▼
+  返回完整资产（约 500 Tokens）：
+  - root_cause 深度根因
+  - code_payload 完整可运行代码与配置
+```
+
+---
+
+### 5.5 混合检索与倒数排名融合 (RRF) 架构
+
+为了保证**“抽象问题不漏检（靠语义），具体报错不失真（靠精确实体）”**：
+1. **第一路（精确匹配）**：SQLite FTS5 `trigram` tokenizer，对代码类名、错误码、文件名、动态库路径具备 100% 字符级穿透力；
+2. **第二路（意图泛化）**：轻量本地向量嵌入（MiniLM / 384维），召回自然语言场景与同义意图；
+3. **倒数排名融合 (RRF 算法)**：
+   $$Score(d) = \sum_{m \in \{fts, vec\}} \frac{1}{60 + Rank_m(d)}$$
+   根据两路召回名次自动结算综合得分，并在项目命名空间内硬过滤，杜绝关键信息漏检。
+
+---
+
+## 6. 消费与读取设计 (Consumption, v2.0 修订)
+
+### 6.1 MCP 工具契约（支持自定义扩展分类与渐进披露）
+
+| 工具 | 职责 |
+|---|---|
+| `exo_record_knowledge` | 主动沉淀（支持内置 learnings/decisions/solutions 及用户自定义扩展分类，含去重与 supersede 版本替换） |
+| `exo_search_knowledge` | ⭐三层渐进披露的第一层：只返回 L3 索引行（id+标题+标签+分类+关联文件，~50-100 token/条） |
+| `exo_get_knowledge` | 第二层：按 ID 获取单张完整知识卡片（L2 详文） |
+| `exo_list_recent` | 拉取最近沉淀（支持 `--project` 与 `--category` 过滤） |
+| `exo_map` | 第三层入口：按 cwd 项目上下文、代码实体关联生成知识地图 |
+
+### 6.2 统计与全局态势洞察 (`exo stats`)
+
+基于扫描并解析的 OpenCode (`opencode.db`) 与 Cursor (`state.vscdb`) 历史会话数据，提供开发者与团队级的宏观态势统计：
+- **工程投入分析**：各项目过去一段时间内的会话总数、改动涉及的核心文件清单、Token 消耗统计；
+- **知识资产大盘**：累计沉淀的排错经验、架构决策（ADR）、可复用脚手架与自定义分类条目数分布；
+- **排错未决预警**：检测历史会话中多次出现报错重试、但未成功沉淀有效正解的遗留技术痛点。
+
+### 6.2 ⭐ 注入预算硬上限
+- 知识地图 Token 预算锁定 500 以内，**代码级强制**（按字符预算裁剪，超限截断并提示用 search 细查）——v1.4 只写在文档里，v2.0 要求实现为断言。
+
+### 6.3 ⭐ 知识地图动态生成（D2 修复，取代静态双份注入）
+
+- **`exo map` 命令**：按当前 cwd 的项目名 + git 最近提交关键词，从两级库实时选 Top-N 生成注入内容，写入项目根 `AGENTS.md` 的知识地图节；
+- **一份文件通吃所有工具**：Codex / Cursor / Devin / Copilot / Amp / Gemini CLI 等 25+ agent 原生读取 AGENTS.md；Claude Code 用 `CLAUDE.md` 首行 `@AGENTS.md` 一行桥接（官方文档指引的标准做法）；
+- 取代 v1.4 的 `.cursor/rules/exobrain-map.mdc` + `.opencode/knowledge-map.xml` 双份人工维护——从"录入负担"变为"一条命令再生成"；
+- 生成时机：`/know` 沉淀后自动刷新 + 用户手动 `exo map`。
+
+---
+
+## 7. "借宿主算力"模式的结构性天花板（v2.0 诚实声明）
+
+> 这是 v2.0 最重要的自我认知，写进文档防止未来误判方向。
+
+**结构性约束**：凡是需要 server 端智能的功能——自动去重判断、语义冲突消解、衰减打分、图谱三元组抽取质量——哑 server 自己都做不了，只有两条路：
+1. 塞进 agent 端 prompt → prompt 膨胀、行为不可控、各 agent 表现不一致；
+2. 自己接模型 → 违背立项原则。
+
+Mem0 式自带管道的方案没有这个矛盾。**这是模式的先天约束，不是工程能修的。**
+
+**但这个天花板恰好罩在"低频高价值写入 + 简单可靠检索"场景上方**——即实操锦囊定位——所以是自洽的。我们主动放弃的能力清单（并接受其代价）：
+- 自动冲突消解 → 接受"agent 判断 + superseded_by 半自动"的降级方案；
+- 智能遗忘 → 接受 P2 阶段做基于命中次数的时间衰减（纯规则，非智能）；
+- 全自动无感沉淀 → 接受"hooks 探测式增强 + 人主动 `/know`"的组合。
+
+**换来的**：零 key 零成本零运维、生态中立（不锁任何工具）、提取质量一手上下文、Markdown 所有权。
+
+**清醒条款**：如果未来需要"自动冲突消解、智能遗忘、图谱自动抽取"这类管道智能，就是该换模式或接管道的时候——届时优先评估 Basic Memory（同模式最成熟）与 mcp-memory-service（混合检索最成熟）作为底层，ExoBrain 收缩为一个领域模板层。
+
+---
+
+## 8. 后期展望与演进路线图 (Roadmap)
+
+### 8.1 P0（立即执行，成本最低收益最大）
+1. **去重管道**：标题哈希精确去重 + FTS5 前置查重 + `superseded_by` 版本链（§4.1）；
+2. **两级记忆空间落地**：workspaces/ 目录结构 + 检索合并序（§5.1）；
+3. **`exo map` 动态知识地图（输出 AGENTS.md）**：取代静态双份注入（§6.3）。
+
+### 8.2 P1（补齐业界基线差距）
+1. **本地 ONNX 混合检索**：vec0 表 + 双路并行 + 0.3/0.7 融合（§5.3）；
+2. **hooks 能力探测式自动提取**：Claude Code/OpenCode 检测挂载，无则降级（§4.3）；
+3. **检索三层渐进披露**：`exo_search_knowledge` 返回结构改造（§6.1）。
+
+### 8.3 P2（锦上添花，Obsidian 生态红利）
+1. **Basic Memory 式卡片语法 + 图谱自动派生**（§5.2）；
+2. **supersede 半自动化增强**：同实体+同问题域检测；
+3. **基于命中次数的规则衰减**（非智能遗忘）；
+4. **Git-Backed Vault Sync**：`~/.exobrain/vault/` 作为本地 Git 仓库，`exo sync` 自动 pull --rebase / push（借鉴 spolom/memory-mcp）；
+5. **工作轨迹盘点**：`exo export --project <name> --format table|csv`。
+
+---
+
+## 9. 当前工程交付资产与质量基线（诚实修正）
+
+**v2.0 起文档与实现严格对齐，以下为截至 v2.0 评审时点的真实状态**：
+
+已落地（`npm test` 4 层测试全绿验证）：
+- `src/storage.js`：SQLite FTS5 (trigram) + WAL + Markdown 双写 + `superseded_by` 字段（仅 schema，链路未启用）；
+- `src/scrubber.js`：脱敏管道（AK/SK、JWT、连接串实测通过）；
+- `src/adapters/`：OpenCodeAdapter（实战验证）+ CursorAdapter（插槽）+ AdapterRegistry；
+- `src/pipeline/`：KnowledgeExtractor 领域启发式 + ScannerService 状态机（session_tracking 表已落地）；
+- `src/index.js` + `src/cli.js`：MCP Server（4 工具）+ CLI（find/get/list/scan/rebuild）。
+
+**尚未落地（v1.4 曾误述为已完成）**：
+- 因果知识图谱（graph_entities/graph_relations 表、递归 CTE 遍历、`[[双链]]` 解析）——零代码，v2.0 将其归入 P2 并改用 Basic Memory 语法派生路线（§5.2）；
+- 模块路径：实际平铺于 `src/` 根目录（storage/config/scrubber 等），非 v1.4 所述的 `src/core/`。
+
+**v2.0 新增承诺待落地项**：见 §8.1-8.3 路线图，P0 三项为下一迭代验收标准。

@@ -1,49 +1,78 @@
 # ExoBrain 需求规格与系统边界定义 (Requirements & Boundaries Specification)
 
-> **版本**：v1.1 (Post-Review Revised)  
-> **状态**：Approved  
-> **核心定位**：AI 编程会话的原生知识外脑（免维护、自动沉淀、遇事即唤）
+> **版本**：v1.2 (Industry Benchmark Reset)
+> **状态**：Approved
+> **核心定位**：AI 编程会话的实操锦囊（免维护、只记有价值知识、全局/项目两级隔离、借宿主算力、不锁工具）
+> **v1.2 变更摘要**：基于业界对标（Mem0 v3 / Zep / Letta / Basic Memory / mcp-memory-service / claude-mem / AGENTS.md 标准）重校系统边界：新增"价值密度原则"与"两级记忆空间"两大核心诉求、确立 MCP + AGENTS.md 双开放标准集成通道、修正 v1.1 中与实现漂移的表述、明确"借宿主算力"模式的结构性天花板及其接受条款。
 
 ---
 
 ## 一、核心业务问题与价值主张
 
-### 1. 业务痛点：“跨三省找历史”与“踩同样的坑”
-在当下使用 AI Agent（OpenCode、Claude Code、Cursor 等）进行软件工程开发时，存在严重的**知识资产流失**问题：
-- **知识蒸发（Knowledge Evaporation）**：开发者花数小时与 Agent 攻克的一个隐蔽环境 Bug、特殊兼容性问题或深层架构决策，在 Session 结束后就彻底淹没在海量对话日志中。下次开启新会话或切换工具时，Agent 依然“失忆”，开发者不得不从头重新解释、再次踩坑。
-- **检索断层（Retrieval Friction）**：开发者模糊记得“以前某个项目、某个 Session 里解决过”，但需要在不同 IDE、不同工程目录的本地数据库与历史聊天窗口中像“跨三省”一样人肉翻找。
-- **录入负担（Documentation Fatigue）**：开发者和团队极度缺乏动力手动在 Notion/飞书/Wiki 中维护一份“踩坑手册”，因为脱离了开发主路径，维护成本极高，极易过时。
+### 1. 业务痛点："跨三省找历史"与"踩同样的坑"
+在当下使用 AI Agent（OpenCode、Cursor、Claude Code、Codex、Workbuddy Code、BodhiQ 等任意工具）进行软件工程开发时，存在严重的**知识资产流失**问题：
+- **知识蒸发（Knowledge Evaporation）**：开发者花数小时与 Agent 攻克的一个隐蔽环境 Bug、特殊兼容性问题或深层架构决策，在 Session 结束后就彻底淹没在海量对话日志中。下次开启新会话或切换工具时，Agent 依然"失忆"，开发者不得不从头重新解释、再次踩坑。
+- **检索断层（Retrieval Friction）**：开发者模糊记得"以前某个项目、某个 Session 里解决过"，但需要在不同 IDE、不同工程目录的本地数据库与历史聊天窗口中像"跨三省"一样人肉翻找。
+- **录入负担（Documentation Fatigue）**：开发者和团队极度缺乏动力手动在 Notion/飞书/Wiki 中维护一份"踩坑手册"，因为脱离了开发主路径，维护成本极高，极易过时。
 
 ### 2. 价值主张 (Value Proposition)
 ExoBrain 让**会话本身成为知识的沉淀源泉**：
 通过主动 MCP 内存直通与后台轻量被动扫描，将散落的对话自动萃取为原子化知识（避坑经验、架构决策、技术方案），并通过全局统一的极速索引与标准 MCP 接口，使得人（CLI 终端）和 Agent（上下文检索）均能在**毫秒级**唤醒过往经验，实现**一次踩坑、全局免疫、永不遗忘**。
 
+### 3. ⭐ 与业界通用记忆层的差异化定位（v1.2 新增）
+
+> **一句话**：他们做的是"通用记忆层"，存的是"发生过什么"；我们做的是"实操锦囊"，存的是"下次遇到该怎么干"。
+
+| 维度 | 业界方案 | ExoBrain |
+|---|---|---|
+| 提取算力 | 自建提取管道（Mem0 要 OpenAI key、Zep 要 Neo4j+LLM、claude-mem 要自建 worker） | **借宿主 Agent 会话算力**（0 key、吃 Prompt Cache） |
+| 知识定位 | 通用事实/偏好/全量观察 | 实操暗知识：现象→根因→正解结构化卡片 + 三分类 |
+| 绑定方式 | 锁特定工具或走 SDK 嵌入 | MCP + AGENTS.md 双开放标准，任意 agent 通吃 |
+| 记录策略 | 多为全量记录后补遗忘机制（claude-mem/memento 的膨胀噪声、mcp-memory-service 被迫补建 consolidation、Claude Code 官方 auto-memory 硬限 200 行） | **写入即高价值**（人在回路 + 宿主一手上下文判断） |
+
+**立项合理性核对结论**（2026-09 业界对标）：Mem0/Zep/Letta/mcp-memory-service/Basic Memory/claude-mem 每一家都满足我们若干条需求、缺失若干条，且缺失项拼不出完整需求（详见架构文档 §2.2 满足度矩阵）——"提炼管道 + 领域模型 + 脱敏"三件自研差异层成立；**存储引擎与检索实现不构成自研理由**，采用开源验证方案。
+
 ---
 
 ## 二、系统边界设计：能做哪些 vs 不做哪些
 
-### 1. 能做哪些 (In-Scope / Core Capabilities)
+### 1. 核心设计原则（v1.2 修订）
+
+| # | 原则 | 说明 |
+|---|---|---|
+| 1 | **价值密度原则** | 只记有长期复用价值的实操暗知识与长效决策，拒绝记录低价值的工具操作流水账（避免膨胀与信噪比崩溃）。 |
+| 2 | **两级空间与项目隔离** | 全局命名空间 + 项目命名空间（基于 Workspace 路径与 Git 根目录自动识别）；写入默认项目级，检索项目优先、全局兜底。 |
+| 3 | **借宿主算力** | 绝不强迫用户配置第三方大模型 Key，利用原会话自身的上下文与模型参数执行提炼，Prompt Cache 极速零额外负担。 |
+| 4 | **不锁工具（双开放标准）** | 集成通道收敛为 MCP（读写交互）+ AGENTS.md（被动注入，AAIF 约定）；跨 OpenCode、Cursor、Claude Code 通吃。 |
+| 5 | **单文件 SQLite 工业存储内核** | 以单文件 SQLite 为核心存储真理源，自带 WAL 事务一致性与 FTS5 倒排索引，原生支持 `VACUUM INTO` 无损归档；Markdown 作为人类友好导出格式（按需导出）。 |
+| 6 | **渐进式披露与存读一体** | 字段物理分层存储（L1 索引摘要 vs L2/L3 根因代码正文）；检索二阶段展开（先查索引再按 ID 抓取正解代码），从根本上避免 Token 爆炸与注意力迷失。 |
+
+### 2. 能做哪些 (In-Scope / Core Capabilities)
 
 | 模块 | 能力边界说明 |
 |---|---|
-| **会话级知识萃取** | 从会话中识别并抽取三类核心知识：<br>1. **避坑指南 (Learnings/Gotchas)**：偶发报错、深层兼容性、环境暗坑及正解。<br>2. **架构决策 (ADR/Decisions)**：为什么选方案 A 不选方案 B、隐性业务规则。<br>3. **技术方案 (Solutions/Know-how)**：关键算法实现、特殊工具链配置、典型代码模板。 |
-| **复用宿主 Agent 算力** | **零外部模型配置**：利用原会话自身的上下文与模型参数执行提炼，利用服务商的 Prompt Cache 实现近乎免费且极速的知识萃取。 |
-| **三级金字塔存储** | 1. **L3 (极短目录)**：单条 20~30 字，基于 SQLite FTS5 (Trigram 分词) 实现毫秒级中英文 BM25 全文检索。<br>2. **L2 (知识卡片)**：300~800 字标准化 Markdown，包含现象、根因、正解与参考文件，物理存储于本地，真理唯一来源。<br>3. **L1 (证据溯源)**：记录原 Session ID、指纹及关键上下文凭证。 |
-| **跨工具全局汇聚** | 统一归纳来自 OpenCode、Cursor、Claude Code 等不同工具的知识资产，汇总至中心化目录 `~/.exobrain/`。 |
-| **敏感凭据前置脱敏** | **强制安全管道 (Secret Scrubbing)**：所有知识落盘入库前，必须经过正则脱敏管道，过滤 API Key、Token、密码、内网私有 IP，防止跨项目泄露。 |
-| **生命周期与自愈重建** | 支持版本覆盖与废弃标记（`superseded_by`），提供 `exo rebuild` 命令，支持从纯 Markdown 目录一键重建 SQLite 全文索引。 |
+| **会话级知识萃取** | 从会话中识别并抽取核心知识，内置三类基础分类，并**支持用户/项目级自定义扩展分类**：<br>1. **避坑指南 (learnings/gotchas)**：偶发报错、深层兼容性、环境暗坑、根因与验证正解。<br>2. **架构决策 (decisions/ADR)**：决策背景、评估过的备选方案、最终抉择、妥协代价与隐性业务规则。<br>3. **技术方案 (solutions/know-how)**：关键算法实现、特殊工具链配置、典型代码脚手架模板。<br>4. ⭐ **用户自定义扩展分类 (custom categories)**：允许项目通过配置文件（`categories.json` / `schema.json`）自由声明新分类（如 `business_rules` 业务规则、`env_recipes` 环境配方、`benchmark_tricks` 赛事调优），定义其必填字段并自动生成校验与存储分层。 |
+| **⭐ 去重与版本链** | 入库前标题哈希精确去重 + FTS5 前置查重；近同义或演进更新走 `superseded_by` / `extends` 版本替换；检索默认只召回有效版本。 |
+| **⭐ 两级空间与代码实体锚定** | 全局 vault + `workspaces/<project>/` 项目 vault；知识卡片与代码实体（`related_files`, `symbols`, `dependencies`）强绑定；文件变更可倒查关联经验。 |
+| **复用宿主 Agent 算力** | **零外部模型与零 API Key 依赖**：利用原会话上下文与宿主环境已配置的模型参数执行提炼与归纳，利用 Prompt Cache 实现近乎免费的萃取。 |
+| **三级渐进式披露存储** | 1. **L3 (极短高密度索引)**：单条 20~30 字，统一格式 `[技术栈/模块] 核心场景/症状 最终结论/正解`，毫秒级检索召回，极低 Token 消耗。<br>2. **L2 (知识卡片真理源)**：300~800 字标准化 Markdown（现象/根因/正解或背景/权衡/决议），本地存储，Obsidian 友好。<br>3. **L1 (证据与溯源)**：原 Session ID、Git Commit、时间戳及上下文凭证。 |
+| **⭐ 双轨获取：主动沉淀 + 定时离线萃取** | 1. **主动链路**：开发者与 Agent 交互中通过 `/know` 或 MCP 工具主动沉淀，即刻落盘；<br>2. **被动离线定时扫描**：后台定时扫描 OpenCode (`opencode.db`) 与 Cursor (`state.vscdb`)，对**超过 2 小时未更新（判定为已结束）**的高价值会话自动借宿主算力萃取并沉淀。 |
+| **跨工具全局汇聚** | 通过 MCP + AGENTS.md 双开放标准支持 OpenCode、Cursor、Claude Code、Codex 等任意工具；底层提供针对 OpenCode 与 Cursor 的双源离线数据适配器。 |
+| **⭐ 全局态势统计与盘点** | 提供 `exo stats` / `exo list`，基于扫描采集的 session 元数据与知识库，统计各项目投入精力、修改重点、关键架构决策演进及避坑总资产。 |
+| **敏感凭据前置脱敏** | 所有知识落盘入库前强制正则脱敏（API Key、Token、密码、内网私有 IP），替换为 `***REDACTED***`。 |
+| **生命周期与自愈重建** | 版本覆盖与废弃标记；`exo rebuild` 从纯 Markdown 目录一键重建 SQLite 倒排索引与图谱。 |
 
----
-
-### 2. 明确不做哪些 (Non-Goals / Out-of-Scope)
+### 3. 明确不做哪些 (Non-Goals / Out-of-Scope)
 
 | 排除项 (Non-Goals) | 排除原因与明确不做的边界 |
 |---|---|
-| ❌ **不做独立大模型推理中继 (No LLM Proxy/Daemon Gateway)** | 绝不要求用户配置第三方 API Key，所有推理必须通过宿主 Agent 借力完成。 |
-| ❌ **不做海量全量向量数据库 (No Heavy Vector DB / RAG)** | 拒绝暴力切片和 Embedding，坚决杜绝语义漂移与闲聊噪声。以“精炼提炼 + FTS5 全文索引”为核心。 |
-| ❌ **不做在线多人协作 Wiki (No Collaborative Wiki / Editor)** | 不做 Notion/飞书的在线协同与富文本编辑器，纯粹面向本地开发者与 Agent。 |
-| ❌ **不做临时任务交接管理器 (No Task Hand-off / Kanban)** | 不管理未完成的临时代码或待办，只沉淀**已经验证过、具备长期复用价值的经验**。 |
-| ❌ **不做侵入式 IDE 修改 (No Binary Hacking / Patching)** | 绝不修改 Cursor 或 VS Code 二进制文件，通过开放的 MCP 协议与规则文件实现无缝集成。 |
+| ❌ **不做独立大模型推理中继 (No LLM Proxy/Daemon Gateway)** | 绝不要求用户配置第三方 API Key，所有推理必须通过宿主 Agent 借力完成。⭐v1.2 明确：此约束导致 server 端无法执行智能管道（自动冲突消解、智能遗忘、三元组抽取质量），我们**主动接受**该天花板（详见架构文档 §7 诚实声明）。 |
+| ❌ **不做海量全量向量库 (No Heavy Vector DB / RAG)** | 拒绝暴力切片和外部 Embedding API。⭐v1.2 修正：允许**本地 ONNX 可选向量层**作为混合检索的语义补充（零 API key），仍拒绝外部向量库与云依赖。 |
+| ❌ **不做在线多人协作 Wiki** | 不做 Notion/飞书的在线协同与富文本编辑器，纯粹面向本地开发者与 Agent。 |
+| ❌ **不做临时任务交接管理器** | 不管理未完成的临时代码或待办，只沉淀已经验证过、具备长期复用价值的经验。 |
+| ❌ **不做侵入式 IDE 修改** | 绝不修改 Cursor 或 VS Code 二进制文件，通过 MCP 协议与 AGENTS.md 开放标准实现无缝集成。 |
+| ❌ **不做全量对话记录器** ⭐新增 | 拒绝"什么都记"的全记录路线（claude-mem/memento 的膨胀噪声教训），不存低价值 observation 洪流，写入即高价值。 |
+| ❌ **不做智能遗忘/冲突消解引擎** ⭐新增 | 哑 server 原则下做不到 server 端智能；接受规则衰减（命中次数+时间）与 superseded_by 半自动的降级方案。 |
 
 ---
 
@@ -51,35 +80,58 @@ ExoBrain 让**会话本身成为知识的沉淀源泉**：
 
 ### 1. 采集与提炼引擎 (Harvesting & Extraction)
 - **FR-1.1 主动直通提炼（跨 Agent 通用核心路径）**：
-  - 用户输入 `/know`、`/save` 或自然语言“沉淀刚才的排查”。
+  - 用户输入 `/know`、`/save` 或自然语言"沉淀刚才的排查/决策"。
   - 宿主 Agent 实时提炼，通过 MCP 工具 `exo_record_knowledge` 内存直通入库，零延迟，不回读 IDE 本地库。
-- **FR-1.2 OpenCode 无头安全提炼（离线兜底）**：
-  - 扫描 `opencode.db`，严格过滤 `parent_id IS NULL` 与特定前缀，防范递归 Fork 炸弹。
-  - 通过 `opencode run --session <id> --fork` 在独立子会话中提炼，Prompt Cache 100% 命中，原会话零污染。
-  - Windows 环境下通过 `taskkill /T /F` 或 Job Objects 进行进程树级超时强杀（120s），防止端口泄漏。
-- **FR-1.3 Cursor 主被动隔离**：
-  - Cursor 全面以 MCP 主动调用为主路径；`state.vscdb` 仅作为只读崩溃后补捞工具，日常不监听高频 WAL 刷盘。
+  - ⭐入库前强制去重管道：标题+分类哈希精确去重；FTS5 前置查重命中则返回已有卡片 ID 引导版本更新；支持 `superseded_by` 显式版本演进链。
+- **FR-1.2 定时离线自动扫描与萃取（两小时静默规则）**：
+  - **调度机制**：后台定时任务（或 CLI `exo scan`），定期轮询 OpenCode 与 Cursor 本地会话库。
+  - **完成态判定标准**：会话最后更新时间距离当前超过 2 小时（`time_updated < now - 2h`），且会话此前未被萃取或标记跳过（`session_id NOT IN session_tracking`）。
+  - **数据源适配**：
+    - **OpenCode**：直接以 WAL 只读模式查询 `opencode.db`，结合 `opencode export --sanitize` 抽取时序对话；
+    - **Cursor**：通过只读不锁机制（`?mode=ro&immutable=1`）读取 `state.vscdb`，穿透 `composerData` 与 `bubbleId` 恢复完整对话、思考过程与工具调用流。
+  - **提炼驱动**：复用宿主环境已配置模型（借算力）对已结束会话进行单轮轻量归纳，高价值内容沉淀入库，无价值会话标记 `SKIPPED_NO_VALUE` 防死循环。
+- **FR-1.3 用户自定义分类与动态模式扩展 (Custom Schema Extension)**：
+  - 支持在项目或全局配置 `categories.json` 定义扩展分类及其必填字段、Markdown 渲染模板、校验规则；
+  - 提炼引擎与 MCP 工具契约动态兼容自定义分类，实现知识体系的无缝演进。
 - **FR-1.4 敏感信息清洗管道 (Secret Scrubbing)**：
   - 入库前自动匹配清洗常见云厂商 AK/SK、JWT、密码、私钥等，替换为 `***REDACTED***`。
 
 ### 2. 存储与分层引擎 (Storage & Indexing)
-- **FR-2.1 原子写入与 Markdown 优先**：
-  - L2 知识卡片采用“临时文件写入 + 原子重命名（Atomic Rename）”落盘，杜绝文件损坏。
-- **FR-2.2 中英文全文索引 (SQLite FTS5 Trigram)**：
-  - 采用 SQLite FTS5 的 `trigram` tokenizer，完美支持中文分词、英文实体词与混合代码片段的高速 BM25 检索。
-- **FR-2.3 数据库防并发死锁**：
-  - 强制开启 `PRAGMA journal_mode = WAL;` 与 `PRAGMA busy_timeout = 5000;`。
+- **FR-2.1 单文件 SQLite 工业存储内核与事务保障**：
+  - 核心存储收敛为单文件 SQLite (`~/.exobrain/exobrain.db`)，强制开启 `PRAGMA journal_mode = WAL;` 与 `PRAGMA busy_timeout = 5000;`，杜绝小文件 I/O 碎片与并发写撕裂。
+- **FR-2.2 存读一体与物理字段分层（渐进式基础）**：
+  - 知识条目分为轻量检索层（`id`, `project`, `category`, `title`, `summary`, `tags`, `related_files`）与深度实体层（`root_cause`, `solution_core`, `code_payload`）。
+  - 检索阶段仅加载检索层字段，详情阶段按需拉取深度实体层。
+- **FR-2.3 混合检索 (FTS5 Trigram + 向量) 与 RRF 排名融合**：
+  - 第一路：SQLite FTS5 `trigram` tokenizer，保障代码类名、错误日志、文件路径的 100% 字符级精确命中；
+  - 第二路：轻量本地向量检索，保障抽象语义意图与同义词泛化；
+  - 结合倒数排名融合（RRF）与项目/分类元数据硬过滤，杜绝关键信息漏检。
+- **FR-2.4 两级命名空间与工作区自动识别**：
+  - 自动基于当前路径向上查找 Git 根目录或目录名生成项目 Slug；
+  - 支持 `project` 命名空间隔离与 `global` 全局兜底。
+- **FR-2.5 无损热备归档与多格式导出**：
+  - 原生支持 `VACUUM INTO` 热备份，不中断读写即可生成紧凑的单文件冷备镜像；
+  - 提供 `exo export --format markdown`，按需将 SQLite 数据无损导出为人类友好的 Markdown 目录树。
 
 ### 3. 消费与消费交互 (Consumption Interfaces)
 - **FR-3.1 统一 MCP 工具契约 (`exo-mcp`)**：
-  - `exo_record_knowledge`: 主动沉淀知识卡片。
-  - `exo_get_knowledge`: 获取单张知识卡片完整正文。
-  - `exo_search_knowledge`: 关键字与标签的全文搜索。
+  - `exo_record_knowledge`: 主动沉淀知识卡片（支持内置 learnings/decisions/solutions 及用户自定义分类，含去重与 supersede 版本替换）。
+  - `exo_search_knowledge`: ⭐三层渐进披露第一层，返回 L3 索引行（id+标题+标签+相关文件，~50-100 token/条）。
+  - `exo_get_knowledge`: 获取单张知识卡片完整正文（第二层 L2）。
   - `exo_list_recent`: 拉取最近沉淀或特定项目的知识。
-- **FR-3.2 知识地图物理注入与容量上限**：
-  - 严格限制预注入条目数（Top-30 或当前项目相关，Token 预算锁定在 500 以内）。
-  - Cursor 端通过维护 `.cursor/rules/exobrain-map.mdc` 规则注入；OpenCode 端通过 `.opencode/knowledge-map.xml` 注入。
-- **FR-3.3 开发者终端 CLI (`exo`)**：
+  - `exo_map`: 按项目上下文与代码关联生成知识地图。
+- **FR-3.2 ⭐ 统计与态势洞察 (`exo stats`)**：
+  - 基于采集的 OpenCode / Cursor 会话元数据与沉淀知识，按时间段、项目汇总统计：
+    - 研发投入轨迹（总会话数、活跃天数、Token 消耗、修改文件总数）；
+    - 知识资产盘点（累计沉淀避坑条数、关键架构决策条数、技术配方条数）；
+    - 历史盲区感知（频繁报错但未形成正解的未决会话预警）。
+- **FR-3.3 知识地图动态注入（AGENTS.md 标准）**：
+  - `exo map` 按当前 cwd 项目名 + git 最近提交关键词 + 代码关联实体实时选 Top-N 生成 AGENTS.md 知识地图节；
+  - Token 预算 500 以内**代码级强制**（超限截断+提示 search 细查）；
+  - 一份 AGENTS.md 通吃主流 Agent。
+- **FR-3.4 开发者终端 CLI (`exo`)**：
   - `exo find "<query>"`：毫秒级终端搜索。
-  - `exo list`：查看最近条目。
+  - `exo list [--project <name>] [--category <type>]`：查看条目（支持项目与自定义分类过滤）。
+  - `exo stats [--project <name>] [--since 7d]`：统计研发活动与知识资产。
+  - `exo scan [--source opencode|cursor]`：手动或定时触发离线会话萃取。
   - `exo rebuild`：从 Markdown 目录全量自愈重建 SQLite 索引。
