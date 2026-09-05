@@ -48,19 +48,31 @@ ExoBrain 的核心使命，是充当开发者与各类 AI Agent（OpenCode、Cur
 
 > 本章为 v2.0 新增核心章节。调研对象（2026-09 时点）：**Mem0 v3**、**Zep/Graphiti**（arXiv 2501.13956 论文 + 仓库）、**Letta/MemGPT**、**Basic Memory**（basicmachines-co）、**mcp-memory-service**（doobidoo，含 issue #175 混合检索完整实现细节）、**claude-mem**（thedotmack，9.3k stars）、**claude-code-memory**（d2a8k3u）、**claude-code-auto-memory**、**AGENTS.md 标准**（Linux 基金会 AAIF，60k+ 项目采用）、**Claude Code hooks 官方规范**（PreCompact/SessionStart/Stop 等）。
 
-### 2.1 竞争格局总览与全景对标
+### 2.1 竞争格局总览与客观分工
 
-结合最新调研（覆盖 Mem0 v3、Zep/Graphiti、Basic Memory、mcp-memory-service、claude-mem、Khoj、Memento-MCP、Context-Forge、Supermemory、Cline Memory Bank）：
+结合最新对标（覆盖 Mem0 v3、Zep/Graphiti、Basic Memory、mcp-memory-service、claude-mem、Aider repomap、Cline Memory Bank、腾讯 TencentDB-Agent-Memory / CodeGraph）：
 
-| 方案 | 核心定位 | 提取与捕获机制 | 存储与组织 | 知识分类体系 | 致命边界与断层 |
-|---|---|---|---|---|---|
-| **claude-mem** | Claude Code 记忆插件 (93k stars) | PostToolUse 钩子拦截每一条工具调用，后台 Worker 异步压缩 | SQLite FTS5 + 可选 Chroma | 固定的 Observation 类型 (decision/bugfix/feature) | 充斥大量命令与工具流水账噪声；Worker 易死锁与内存泄露；OpenCode 插件常年报错 |
-| **Basic Memory** | Markdown 知识库 MCP | 纯依靠用户/Agent 自觉调工具读写 | Markdown + Wikilinks + SQLite 倒排 | 通用 Observation/Relation，无业务结构 | 纯哑记事本，脱离主路径，无自动化提取能力 |
-| **mcp-memory-service** | 持久化记忆中间件 | 靠 Agent 自觉调用或 REST 上报 | SQLite-vec + FTS5 trigram 混合检索，支持遗忘衰减 | 碎片化语义片段 + 因果标签 | 小型通用向量模型对代码架构理解极弱，易产生跨项目语义污染 |
-| **Cline Memory Bank** | 提示词驱动文件规范 | 提示词强制 Agent 维护 `memory-bank/*.md` | 项目根目录下 6~7 个纯 Markdown 文件 | 固化的生命周期文档 (patterns, activeContext) | 开局暴力全量读取引发 **Token 爆炸与卡顿**；依赖 Agent 自律导致文档严重腐化漂移 |
-| **Memento / Context-Forge** | 轻量工程 MCP 插件 | 会话 Prompt 钩子截获 + MCP 显式调用 | 本地 SQLite + FTS5 | 预设固化枚举分类 (decisions, pitfalls, bugs) | 片段极度零碎；不支持业务自定义 Schema 扩展；缺少完整的 ADR 版本演进废弃链 |
-| **Supermemory** | 统一长效记忆云平台 | 会话蒸馏 + 虚拟文件系统 (smfs) | 云端原子事实图谱 (Updates/Extends/Derives) | 动态关系图演化 | **引擎闭源+数据出境**；擅长通用事实，对深层代码排错与因果验证无建模 |
-| **ExoBrain** | **工程暗知识与决策随身外脑** | **双轨制**：主动 `/know` + 定时离线自动扫描（2小时无更新静默判定），借宿主算力萃取 | **Markdown 真理源 + SQLite FTS5 加速视图 + L1-L3 渐进披露** | **可扩展核心三元组 + 用户自定义 Schema 框架** | **专注工程决策与实操正解，杜绝操作流水账，零额外依赖与零 API Key** |
+| 方案 / 流派 | 核心定位与技术底座 | 擅长领域（不可否定的价值） | 边界与局限性（为什么无法替代工程外脑） |
+|---|---|---|---|
+| **腾讯开源 CodeGraph**<br>(TencentDB-Agent-Memory) | Tree-sitter AST 解析 + 嵌入式 SQLite + 拓扑遍历（复用 colbymchenry/codegraph） | **静态代码调用链与爆炸半径（Blast Radius）分析**，精准计算函数出入度与受影响模块 | 解决的是“代码怎么连、改动影响谁”，但无法记录代码背后的意图与历史决策 |
+| **Aider (repomap)** | Tree-sitter + PageRank 算法计算核心符号拓扑密度 | **瞬时动态工作区大纲**，1k~2k Tokens 即可精准交代核心类和符号位置 | 瞬时只读投影，不负责跨会话的认知沉淀与排错经验留存 |
+| **claude-mem** | Hook 拦截 Tool 调用 + 异步后台提炼 + 3-Layer 渐进披露 | **会话级操作轨迹审计与局部排错接力**，按需展开有效降低 Token 消耗 | 偏向操作流水账（行车记录仪），缺乏全局系统模型与架构决策（ADR）建模 |
+| **Cline Memory Bank** | 规范化 Markdown 模板 + System Prompt 约束读写 | **最贴合软件工程生命周期的文档规范**，涵盖架构模式、技术背景与业务愿景 | 纯靠 Prompt 自律驱动，长会话极易遗忘更新，缺乏数据库级版本演进仲裁 |
+| **Mem0 / Zep / Graphiti** | 对话事实抽取 + 语义向量 / 双时态知识图谱 | **通用伴侣/客服对话中的个人偏好与扁平陈述事实追踪** | 颗粒度错配，三元组无法表达微服务事务、并发锁、响应式流等强逻辑工程概念 |
+| **ExoBrain** | **工程暗知识与长效决策随身外脑**<br>(单文件 SQLite 内核 + 存读一体分层 + 双轨萃取) | **专注工程暗知识因果链（现象-根因-正解代码）与架构权衡决策（ADR），零额外开销** | 不替代 Tree-sitter 静态代码分析，与代码拓扑互为齿轮协同运作 |
+
+### 2.2 工业界双轮驱动模型：代码物理图谱 vs 工程经验记忆
+
+严肃工业界（腾讯、微软等）的最新共识：**代码工程理解绝非单一银弹，必须由“物理世界”与“经验世界”两套齿轮协同咬合**：
+
+1. **代码物理图谱（CodeGraph / Aider repomap）——回答“What & Where”**：
+   - 依赖 AST 语法树和符号依赖分析，提供客观、确定性的调用拓扑；
+   - 确保 Agent 不用全仓盲目 Grep，改动底层接口前清晰预警下游连带故障。
+2. **工程经验外脑（ExoBrain）——回答“Why & How”**：
+   - 依赖工程诊断因果链与架构决策记录，提供长效、演进式的经验认知；
+   - 确保 Agent 不重复踩历史环境坑，理解“老系统为什么有这个看似冗余的防御性逻辑”。
+
+**ExoBrain 的精准生态位**：坚决不重复造代码编译器和 AST 解析器的轮子，牢牢深耕代码 AST 无法体现的**【长效架构决策权衡 + 验证避坑正解 + 业务隐性潜规则】**。
 
 ### 2.2 逐方案需求满足度核对（对照我们需求硬性清单）
 
