@@ -32,10 +32,14 @@ export class OpenCodeAdapter extends AgentAdapter {
       FROM session
       WHERE parent_id IS NULL
         AND title NOT LIKE '[ExoBrain]%'
+        AND title NOT LIKE '[MemoryHub]%'
+        AND (time_updated < (? - 2 * 60 * 60 * 1000) OR ? = true)
       ORDER BY time_updated DESC
       LIMIT ?
     `;
-    const candidates = db.prepare(query).all(limit * 2);
+    const forceScan = Boolean(options.force);
+    const now = Date.now();
+    const candidates = db.prepare(query).all(now, forceScan ? 1 : 0, limit * 2);
 
     const results = [];
     for (const c of candidates) {

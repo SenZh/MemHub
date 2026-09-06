@@ -1,9 +1,11 @@
 {
-  "name": "exobrain",
-  "version": "0.1.0",
+  "name": "memory-hub",
+  "version": "0.2.0",
   "type": "module",
-  "description": "The self-accumulating knowledge base for AI coding agents",
+  "description": "The unified knowledge & memory hub for AI coding agents",
   "bin": {
+    "memory-hub": "./src/index.js",
+    "hub": "./src/cli.js",
     "exobrain-mcp": "./src/index.js",
     "exo": "./src/cli.js"
   },

@@ -9,12 +9,20 @@ import {
   McpError
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { recordKnowledge, searchKnowledge, getKnowledge, listRecent } from './storage.js';
+import { 
+  recordKnowledge, 
+  searchKnowledge, 
+  getKnowledge, 
+  getKnowledgeBatch, 
+  listRecent,
+  backupDatabase,
+  getStats
+} from './storage.js';
 
 const server = new Server(
   {
-    name: 'exobrain-mcp',
-    version: '0.1.0'
+    name: 'memory-hub',
+    version: '0.2.0'
   },
   {
     capabilities: {
@@ -23,13 +31,13 @@ const server = new Server(
   }
 );
 
-// 1. 注册可用工具列表 (ListTools)
+// 1. 注册可用工具列表 (ListTools) - 同时兼容 hub_* 与 exo_* 双命名空间
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: 'exo_record_knowledge',
-        description: '【主动知识沉淀】当攻克了复杂排错/Bug、做出关键架构决策、或提炼出可复用解决方案时，调用此工具将知识永久保存到 ExoBrain 知识库。',
+        name: 'hub_record_knowledge',
+        description: '【主动知识沉淀】当攻克了复杂排错/Bug、做出关键架构决策、或提炼出通用可复用方案时，将高价值工程暗知识持久化存入 Memory Hub。支持前置查重与版本替换。',
         inputSchema: {
           type: 'object',
           properties: {
@@ -39,8 +47,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             category: {
               type: 'string',
-              enum: ['learnings', 'decisions', 'solutions'],
-              description: '知识分类：learnings(踩坑排错), decisions(架构设计决策), solutions(通用方案模板)'
+              description: '知识分类：learnings(踩坑排错), decisions(架构设计决策), solutions(通用方案模板) 或项目自定义分类'
             },
             tags: {
               type: 'array',
@@ -67,24 +74,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             session_id: {
               type: 'string',
               description: '当前会话的 Session ID（若上下文可知）'
+            },
+            supersedes: {
+              type: 'string',
+              description: '可选：若本次沉淀是对某张历史卡片的演进或推翻，填入被替代的旧卡片 ID (如 kb-xxxx)'
             }
           },
           required: ['title', 'category', 'tags', 'symptom', 'root_cause', 'solution']
         }
       },
       {
-        name: 'exo_search_knowledge',
-        description: '【毫秒级知识检索】在设计方案或排查 Bug 前，搜索 ExoBrain 历史知识库，查找是否已有排错经验或已定架构决策，防止重复踩坑。',
+        name: 'hub_search_knowledge',
+        description: '【第一步：检索高维索引】在设计方案或排查 Bug 前，毫秒级检索知识库。注意：本工具仅返回 L1 极简摘要与 ID (~30-50 Tokens)，绝对不含代码正文。若命中相关条目，必须紧接着调用 hub_get_knowledge 拉取正文。',
         inputSchema: {
           type: 'object',
           properties: {
             query: {
               type: 'string',
-              description: '搜索关键词或问题描述（支持中英文、代码实体名，如 "Alpine glibc" 或 "Spring 循环依赖"）'
+              description: '搜索关键词或问题描述（支持中英文、错误日志、代码实体名，如 "Alpine glibc" 或 "Spring 循环依赖"）'
             },
             category: {
               type: 'string',
-              enum: ['learnings', 'decisions', 'solutions'],
               description: '可选：限定分类'
             },
             limit: {
@@ -96,21 +106,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'exo_get_knowledge',
-        description: '【读取详细知识卡片】根据搜索命中的知识 ID (如 kb-xxxx)，拉取完整的 L2 Markdown 正文及完整正解代码。',
+        name: 'hub_get_knowledge',
+        description: '【第二步：展开详情与代码正文】根据 hub_search_knowledge 返回的 ID 数组，拉取完整的深度根因分析与验证正解代码（L2/L3 详文）。',
         inputSchema: {
           type: 'object',
           properties: {
+            ids: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '要拉取的一组或单个知识卡片 ID 列表 (例如 ["kb-c3ffcbe1"])'
+            },
             id: {
               type: 'string',
-              description: '知识卡片 ID (形如 kb-c3ffcbe1)'
+              description: '单个卡片 ID（兼容旧单值参数）'
             }
-          },
-          required: ['id']
+          }
         }
       },
       {
-        name: 'exo_list_recent',
+        name: 'hub_list_recent',
         description: '【查看最近知识地图】列出最近沉淀的知识索引，用于开局建立上下文或查看项目动态。',
         inputSchema: {
           type: 'object',
@@ -125,147 +139,228 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             }
           }
         }
+      },
+      // 兼容旧 exo_* 前缀别名
+      {
+        name: 'exo_record_knowledge',
+        description: '【向后兼容别名】请优先使用 hub_record_knowledge。',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            category: { type: 'string' },
+            tags: { type: 'array', items: { type: 'string' } },
+            symptom: { type: 'string' },
+            root_cause: { type: 'string' },
+            solution: { type: 'string' },
+            related_files: { type: 'array', items: { type: 'string' } },
+            session_id: { type: 'string' },
+            supersedes: { type: 'string' }
+          },
+          required: ['title', 'category', 'tags', 'symptom', 'root_cause', 'solution']
+        }
+      },
+      {
+        name: 'exo_search_knowledge',
+        description: '【向后兼容别名】请优先使用 hub_search_knowledge。',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            category: { type: 'string' },
+            limit: { type: 'number' }
+          },
+          required: ['query']
+        }
+      },
+      {
+        name: 'exo_get_knowledge',
+        description: '【向后兼容别名】请优先使用 hub_get_knowledge。',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        }
+      },
+      {
+        name: 'exo_list_recent',
+        description: '【向后兼容别名】请优先使用 hub_list_recent。',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number' },
+            project: { type: 'string' }
+          }
+        }
       }
     ]
   };
 });
 
-// 2. 处理工具执行请求 (CallTool)
+// 2. 处理工具调用请求 (CallTool)
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
-  try {
-    switch (name) {
-      case 'exo_record_knowledge': {
+  switch (name) {
+    case 'hub_record_knowledge':
+    case 'exo_record_knowledge': {
+      try {
         const result = recordKnowledge(args);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify({
-                status: 'success',
-                message: `成功沉淀知识卡片 [${result.id}]`,
-                id: result.id,
-                title: result.title,
-                category: result.category,
-                file_path: result.file_path
-              }, null, 2)
+              text: JSON.stringify(result, null, 2)
             }
           ]
         };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `沉淀知识失败: ${error.message}` }]
+        };
       }
+    }
 
-      case 'exo_search_knowledge': {
+    case 'hub_search_knowledge':
+    case 'exo_search_knowledge': {
+      try {
         const results = searchKnowledge(args.query, {
           category: args.category,
           limit: args.limit || 5
         });
 
-        if (results.length === 0) {
+        if (!results || results.length === 0) {
           return {
             content: [
               {
                 type: 'text',
-                text: `未检索到与 "${args.query}" 相关的历史知识。建议自行排查后调用 exo_record_knowledge 沉淀经验。`
+                text: JSON.stringify({
+                  total_hits: 0,
+                  message: `未检索到与 "${args.query}" 相关的历史暗知识或架构决策。`,
+                  results: []
+                }, null, 2)
               }
             ]
           };
         }
 
-        const formatted = results.map((r, i) => 
-          `${i + 1}. [${r.id}] [${r.category}] ${r.title}\n   - 标签: ${r.tags.join(', ')}\n   - 关联项目: ${r.project || '全局'}\n   - 摘要: ${r.solution_snippet || r.symptom_snippet || '详见卡片'}`
-        ).join('\n\n');
+        // 渐进式披露 L1 核心返回，附带明确的 instruction 引导
+        const payload = {
+          total_hits: results.length,
+          instruction: `已命中 ${results.length} 条相关知识索引。请比对是否与当前问题吻合。如需完整技术根因、正解代码与修改步骤，请立即调用 hub_get_knowledge(ids=[...]) 获取详情。`,
+          results: results.map(r => ({
+            id: r.id,
+            title: r.title,
+            category: r.category,
+            project: r.project,
+            tags: r.tags,
+            summary: r.summary,
+            related_files: r.related_files
+          }))
+        };
 
         return {
           content: [
             {
               type: 'text',
-              text: `检索到 ${results.length} 条相关知识：\n\n${formatted}\n\n提示：如需查看完整排错方案与代码，请调用 exo_get_knowledge(id)。`
+              text: JSON.stringify(payload, null, 2)
             }
           ]
         };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `检索知识失败: ${error.message}` }]
+        };
       }
+    }
 
-      case 'exo_get_knowledge': {
-        const card = getKnowledge(args.id);
-        if (!card) {
+    case 'hub_get_knowledge':
+    case 'exo_get_knowledge': {
+      try {
+        // 支持单个 id 或 ids 数组
+        let targetIds = [];
+        if (Array.isArray(args.ids)) {
+          targetIds = args.ids;
+        } else if (args.id) {
+          targetIds = [args.id];
+        }
+
+        if (targetIds.length === 0) {
+          throw new Error('缺少必填参数 id 或 ids 列表');
+        }
+
+        const details = getKnowledgeBatch(targetIds);
+
+        if (details.length === 0) {
           return {
             isError: true,
-            content: [
-              {
-                type: 'text',
-                text: `未找到 ID 为 "${args.id}" 的知识卡片。`
-              }
-            ]
+            content: [{ type: 'text', text: `未找到 ID 为 [${targetIds.join(', ')}] 的知识卡片。` }]
           };
         }
+
+        // 若只查单条，直接返回单条 Markdown；若多条，组合返回
+        const combinedText = details.map(d => d.content).join('\n\n---\n\n');
 
         return {
           content: [
             {
               type: 'text',
-              text: card.content
+              text: combinedText
             }
           ]
         };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `读取知识详情失败: ${error.message}` }]
+        };
       }
+    }
 
-      case 'exo_list_recent': {
-        const list = listRecent({
-          limit: args?.limit || 10,
-          project: args?.project
+    case 'hub_list_recent':
+    case 'exo_list_recent': {
+      try {
+        const results = listRecent({
+          limit: args.limit || 10,
+          project: args.project
         });
 
-        if (list.length === 0) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: '当前知识库为空。'
-              }
-            ]
-          };
-        }
-
-        const formatted = list.map((item, i) =>
-          `${i + 1}. [${item.id}] [${item.category}] ${item.title} (项目: ${item.project || '通用'})`
-        ).join('\n');
-
         return {
           content: [
             {
               type: 'text',
-              text: `最近沉淀的知识地图 (共 ${list.length} 条)：\n\n${formatted}`
+              text: JSON.stringify({
+                total: results.length,
+                results
+              }, null, 2)
             }
           ]
         };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `拉取最近列表失败: ${error.message}` }]
+        };
       }
-
-      default:
-        throw new McpError(ErrorCode.MethodNotFound, `未知工具: ${name}`);
     }
-  } catch (error) {
-    console.error(`[ExoBrain MCP Error] 执行工具 ${name} 失败:`, error);
-    return {
-      isError: true,
-      content: [
-        {
-          type: 'text',
-          text: `执行失败: ${error.message}`
-        }
-      ]
-    };
+
+    default:
+      throw new McpError(ErrorCode.MethodNotFound, `未知工具: ${name}`);
   }
 });
 
-// 3. 启动基于 Stdio 的传输层
+// 3. 启动 Server 并监听 Stdio
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[ExoBrain MCP Server] 已启动，正在通过 stdio 监听请求...');
+  console.error('[Memory Hub MCP Server] 已启动，正在通过 stdio 监听请求...');
 }
 
 main().catch((err) => {
-  console.error('[ExoBrain MCP Server] 启动崩溃:', err);
+  console.error('[Memory Hub MCP Server] 启动失败:', err);
   process.exit(1);
 });

@@ -53,7 +53,7 @@ async function runTest() {
     clientInfo: { name: 'test-client', version: '1.0.0' }
   });
   console.log('初始化响应:', initRes.result?.serverInfo);
-  assert(initRes.result?.serverInfo?.name === 'exobrain-mcp');
+  assert(initRes.result?.serverInfo?.name === 'memory-hub');
 
   console.log('\n--- 2. 发送 tools/list 获取注册工具 ---');
   const listRes = await sendRequest('tools/list');
@@ -61,14 +61,15 @@ async function runTest() {
   console.log('注册工具数量:', tools.length);
   const toolNames = tools.map(t => t.name);
   console.log('工具名列表:', toolNames);
-  assert(toolNames.includes('exo_record_knowledge'));
-  assert(toolNames.includes('exo_search_knowledge'));
-  assert(toolNames.includes('exo_get_knowledge'));
-  assert(toolNames.includes('exo_list_recent'));
+  assert(toolNames.includes('hub_record_knowledge'));
+  assert(toolNames.includes('hub_search_knowledge'));
+  assert(toolNames.includes('hub_get_knowledge'));
+  assert(toolNames.includes('hub_list_recent'));
+  assert(toolNames.includes('exo_record_knowledge')); // 向后兼容
 
-  console.log('\n--- 3. 调用 exo_record_knowledge 记录知识 ---');
+  console.log('\n--- 3. 调用 hub_record_knowledge 记录知识 ---');
   const recordRes = await sendRequest('tools/call', {
-    name: 'exo_record_knowledge',
+    name: 'hub_record_knowledge',
     arguments: {
       title: '[SpringSecurity6] 升级后 SecurityFilterChain 循环依赖解耦方案',
       category: 'decisions',
@@ -82,34 +83,37 @@ async function runTest() {
   console.log('Record 工具响应:', recordRes.result?.content?.[0]?.text);
   assert(!recordRes.result?.isError);
   const recordData = JSON.parse(recordRes.result?.content?.[0]?.text);
-  assert(recordData.status === 'success');
+  assert(recordData.success === true);
   const createdId = recordData.id;
 
-  console.log('\n--- 4. 调用 exo_search_knowledge 检索知识 ---');
+  console.log('\n--- 4. 调用 hub_search_knowledge (验证渐进式 L1 检索与 instruction 引导) ---');
   const searchRes = await sendRequest('tools/call', {
-    name: 'exo_search_knowledge',
+    name: 'hub_search_knowledge',
     arguments: {
       query: '循环依赖'
     }
   });
   console.log('Search 工具响应:\n' + searchRes.result?.content?.[0]?.text);
   assert(!searchRes.result?.isError);
-  assert(searchRes.result?.content?.[0]?.text.includes(createdId));
+  const searchPayload = JSON.parse(searchRes.result?.content?.[0]?.text);
+  assert(searchPayload.total_hits > 0);
+  assert(searchPayload.instruction.includes('hub_get_knowledge')); // 验证 instruction 引导
+  assert(searchPayload.results.some(r => r.id === createdId));
 
-  console.log('\n--- 5. 调用 exo_get_knowledge 读取详细卡片 ---');
+  console.log('\n--- 5. 调用 hub_get_knowledge (第二阶段按需拉取完整 L2/L3 代码详情) ---');
   const getRes = await sendRequest('tools/call', {
-    name: 'exo_get_knowledge',
+    name: 'hub_get_knowledge',
     arguments: {
-      id: createdId
+      ids: [createdId]
     }
   });
   console.log('Get 工具响应卡片前 200 字:\n' + getRes.result?.content?.[0]?.text.slice(0, 200) + '...');
   assert(!getRes.result?.isError);
   assert(getRes.result?.content?.[0]?.text.includes('AuthenticationConfiguration'));
 
-  console.log('\n--- 6. 调用 exo_list_recent ---');
+  console.log('\n--- 6. 调用 hub_list_recent ---');
   const recentRes = await sendRequest('tools/call', {
-    name: 'exo_list_recent',
+    name: 'hub_list_recent',
     arguments: { limit: 3 }
   });
   console.log('List 工具响应:\n' + recentRes.result?.content?.[0]?.text);
