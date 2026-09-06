@@ -6,7 +6,7 @@
   "bin": {
     "memhub": "./src/cli.js",
     "mem-hub": "./src/cli.js",
-    "memory-hub": "./src/index.js",
+    "memhub-mcp": "./src/index.js",
     "exobrain-mcp": "./src/index.js",
     "exo": "./src/cli.js"
   },
@@ -17,7 +17,8 @@
     "test:adapters": "node tests/test-adapters.js",
     "test:extractor": "node tests/test-extractor.js",
     "test:mcp": "node tests/test-mcp-protocol.js",
-    "test:path-filter": "node tests/test-path-filter.js"
+    "test:path-filter": "node tests/test-path-filter.js",
+    "test:cli": "node tests/test-cli.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0"

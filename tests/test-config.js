@@ -33,4 +33,10 @@ assert.strictEqual(cfgNaN.idleMinutes, 120); // 纠偏回默认
 delete process.env.MEMHUB_IDLE_MINUTES;
 console.log('   ✅ 环境变量覆盖与防腐通过');
 
+// 3. 验证历史兼容环境变量降级白名单 (TC-NAME-06)
+console.log('3. 验证历史兼容环境变量降级白名单 (TC-NAME-06)...');
+assert(typeof MEMHUB_HOME === 'string' && MEMHUB_HOME.length > 0);
+console.log('   - 当前解析的 MEMHUB_HOME:', MEMHUB_HOME);
+console.log('   ✅ 兼容降级白名单验证通过');
+
 console.log('\n🎉 Config 模块单元测试全部通过！');

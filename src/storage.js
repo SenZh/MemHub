@@ -402,7 +402,7 @@ export function backupDatabase(targetPath = null) {
   ensureDirectories();
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const finalPath = targetPath || path.join(BACKUP_DIR, `memory_hub_backup_${timestamp}.db`);
+  const finalPath = targetPath || path.join(BACKUP_DIR, `memhub_backup_${timestamp}.db`);
 
   if (fs.existsSync(finalPath)) {
     fs.unlinkSync(finalPath);

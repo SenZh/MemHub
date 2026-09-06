@@ -21,8 +21,8 @@ import {
 
 const server = new Server(
   {
-    name: 'memory-hub',
-    version: '0.2.0'
+    name: 'memhub',
+    version: '0.2.1'
   },
   {
     capabilities: {
@@ -37,7 +37,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: 'hub_record_knowledge',
-        description: '【主动知识沉淀】当攻克了复杂排错/Bug、做出关键架构决策、或提炼出通用可复用方案时，将高价值工程暗知识持久化存入 Memory Hub。支持前置查重与版本替换。',
+        description: '【主动知识沉淀】当攻克了复杂排错/Bug、做出关键架构决策、或提炼出通用可复用方案时，将高价值工程暗知识持久化存入 MemHub。支持前置查重与版本替换。',
         inputSchema: {
           type: 'object',
           properties: {
@@ -357,10 +357,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[Memory Hub MCP Server] 已启动，正在通过 stdio 监听请求...');
+  console.error('[MemHub MCP Server] 已启动，正在通过 stdio 监听请求...');
 }
 
 main().catch((err) => {
-  console.error('[Memory Hub MCP Server] 启动失败:', err);
+  console.error('[MemHub MCP Server] 启动失败:', err);
   process.exit(1);
 });

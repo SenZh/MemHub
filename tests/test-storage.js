@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
+import path from 'node:path';
 import { 
   recordKnowledge, 
   searchKnowledge, 
@@ -85,6 +86,7 @@ console.log('--- 开始测试 5: VACUUM INTO 无损原子热备份与 Markdown �
 const backupPath = backupDatabase();
 console.log('热备份镜像生成于:', backupPath);
 assert(fs.existsSync(backupPath));
+assert(path.basename(backupPath).startsWith('memhub_backup_'), '备份文件名前缀必须以 memhub_backup_ 开头！');
 
 const exportRes = exportToMarkdown();
 console.log('Markdown 导出结果:', exportRes);

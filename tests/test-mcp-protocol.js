@@ -53,9 +53,10 @@ async function runTest() {
     clientInfo: { name: 'test-client', version: '1.0.0' }
   });
   console.log('初始化响应:', initRes.result?.serverInfo);
-  assert(initRes.result?.serverInfo?.name === 'memory-hub');
+  // 严格校验名称为 memhub
+  assert.strictEqual(initRes.result?.serverInfo?.name, 'memhub', 'Server Name 必须精确为 memhub');
 
-  console.log('\n--- 2. 发送 tools/list 获取注册工具 ---');
+  console.log('\n--- 2. 发送 tools/list 获取注册工具并扫描工具描述防反弹 ---');
   const listRes = await sendRequest('tools/list');
   const tools = listRes.result?.tools || [];
   console.log('注册工具数量:', tools.length);
@@ -66,6 +67,12 @@ async function runTest() {
   assert(toolNames.includes('hub_get_knowledge'));
   assert(toolNames.includes('hub_list_recent'));
   assert(toolNames.includes('exo_record_knowledge')); // 向后兼容
+
+  // 严密断言：所有工具描述中不得出现 Memory Hub 残留
+  tools.forEach(t => {
+    assert(!t.description.includes('Memory Hub'), `工具 [${t.name}] 的描述中存在 Memory Hub 残留！`);
+  });
+  console.log('   ✅ 工具描述防反弹扫描通过 (无 Memory Hub 残留)');
 
   console.log('\n--- 3. 调用 hub_record_knowledge 记录知识 ---');
   const recordRes = await sendRequest('tools/call', {
