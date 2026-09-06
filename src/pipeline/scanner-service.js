@@ -1,6 +1,7 @@
 import { registry } from '../adapters/index.js';
 import { KnowledgeExtractor } from './extractor.js';
 import { getDatabase, recordKnowledge } from '../storage.js';
+import { getConfig } from '../config.js';
 
 export class ScannerService {
   constructor(adapter = null) {
@@ -35,15 +36,24 @@ export class ScannerService {
   }
 
   /**
-   * 执行单次批量离线扫描
+   * 执行单次批量离线扫描 (注入全局配置与动态规则)
    */
-  scanAndProcess(limit = 2) {
+  scanAndProcess(options = {}) {
+    const limit = typeof options === 'number' ? options : (options.limit || 2);
+    const globalConfig = getConfig();
+    
     if (!this.adapter || !this.adapter.isAvailable()) {
       return { success: false, message: `适配器不可用或未安装` };
     }
 
     const excludeIds = this.getProcessedSessionIds();
-    const candidates = this.adapter.scanCandidateSessions({ limit, excludeIds });
+    const candidates = this.adapter.scanCandidateSessions({
+      limit,
+      excludeIds,
+      idleMinutes: options.idleMinutes ?? globalConfig.idleMinutes,
+      scanRules: options.scanRules ?? globalConfig.scanRules,
+      force: options.force
+    });
 
     const results = [];
     for (const session of candidates) {

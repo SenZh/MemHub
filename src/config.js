@@ -2,63 +2,126 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 
-// 优先采用 MEMORY_HUB_HOME，平滑兼容旧 EXOBRAIN_HOME
-const legacyHome = process.env.EXOBRAIN_HOME || path.join(os.homedir(), '.exobrain');
-const defaultHubHome = path.join(os.homedir(), '.memory-hub');
+// 优先采用环境变量声明，具有最高优先级
+const legacyExoHome = process.env.EXOBRAIN_HOME;
+const legacyMemoryHubHome = process.env.MEMORY_HUB_HOME;
+const memHubEnvHome = process.env.MEMHUB_HOME;
 
-export const MEMORY_HUB_HOME = process.env.MEMORY_HUB_HOME || (fs.existsSync(legacyHome) ? legacyHome : defaultHubHome);
-export const EXOBRAIN_HOME = MEMORY_HUB_HOME; // 保持向后兼容
+function resolveHome() {
+  // 环境变量绝对优先
+  if (memHubEnvHome) return memHubEnvHome;
+  if (legacyMemoryHubHome) return legacyMemoryHubHome;
+  if (legacyExoHome) return legacyExoHome;
 
-export const DB_PATH = path.join(MEMORY_HUB_HOME, 'memory.db');
-export const VAULT_DIR = path.join(MEMORY_HUB_HOME, 'vault');
-export const BACKUP_DIR = path.join(MEMORY_HUB_HOME, 'backups');
+  // 物理目录优先级：~/.memhub -> ~/.memory-hub -> ~/.exobrain
+  const defaultMemHubHome = path.join(os.homedir(), '.memhub');
+  const diskLegacyMemoryHub = path.join(os.homedir(), '.memory-hub');
+  const diskLegacyExo = path.join(os.homedir(), '.exobrain');
+
+  if (fs.existsSync(defaultMemHubHome)) return defaultMemHubHome;
+  if (fs.existsSync(diskLegacyMemoryHub)) return diskLegacyMemoryHub;
+  if (fs.existsSync(diskLegacyExo)) return diskLegacyExo;
+  return defaultMemHubHome;
+}
+
+export const MEMHUB_HOME = resolveHome();
+export const MEMORY_HUB_HOME = MEMHUB_HOME; // 保持向后兼容
+export const EXOBRAIN_HOME = MEMHUB_HOME;     // 保持向后兼容
+
+export const DB_PATH = path.join(MEMHUB_HOME, 'memory.db');
+export const VAULT_DIR = path.join(MEMHUB_HOME, 'vault');
+export const BACKUP_DIR = path.join(MEMHUB_HOME, 'backups');
 
 export const DEFAULT_CATEGORIES = ['learnings', 'decisions', 'solutions'];
 
 /**
- * 动态读取用户自定义分类 (从 ~/.memory-hub/categories.json 或当前项目 .memory-hub/categories.json)
+ * 读取完整的 MemHub 配置 (合并全局与项目级配置，并解析环境变量)
  */
-export function getCategories(projectPath = process.cwd()) {
-  const categories = new Set(DEFAULT_CATEGORIES);
+export function getConfig(projectPath = process.cwd()) {
+  const config = {
+    idleMinutes: 120,
+    scanRules: {
+      watchDirectories: [],
+      include: [],
+      exclude: []
+    },
+    categories: [...DEFAULT_CATEGORIES]
+  };
 
-  // 1. 全局配置
-  const globalConfigPath = path.join(MEMORY_HUB_HOME, 'categories.json');
+  // 1. 读取全局配置
+  const globalConfigPath = path.join(MEMHUB_HOME, 'config.json');
   if (fs.existsSync(globalConfigPath)) {
     try {
-      const data = JSON.parse(fs.readFileSync(globalConfigPath, 'utf8'));
-      if (Array.isArray(data.categories)) {
-        data.categories.forEach(c => categories.add(c));
-      } else if (typeof data.categories === 'object') {
-        Object.keys(data.categories).forEach(c => categories.add(c));
-      }
+      const g = JSON.parse(fs.readFileSync(globalConfigPath, 'utf8'));
+      _mergeConfig(config, g);
     } catch (e) {}
   }
 
-  // 2. 项目局部配置
+  // 2. 读取项目局部配置
   if (projectPath) {
-    const projConfigPath = path.join(projectPath, '.memory-hub', 'categories.json');
-    const legacyProjConfig = path.join(projectPath, '.exobrain', 'categories.json');
-    const targetPath = fs.existsSync(projConfigPath) ? projConfigPath : legacyProjConfig;
-    if (fs.existsSync(targetPath)) {
+    const p1 = path.join(projectPath, '.memhub', 'config.json');
+    const p2 = path.join(projectPath, '.memory-hub', 'config.json');
+    const p3 = path.join(projectPath, '.exobrain', 'config.json');
+    const projConfigPath = [p1, p2, p3].find(p => fs.existsSync(p));
+    if (projConfigPath) {
       try {
-        const data = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
-        if (Array.isArray(data.categories)) {
-          data.categories.forEach(c => categories.add(c));
-        } else if (typeof data.categories === 'object') {
-          Object.keys(data.categories).forEach(c => categories.add(c));
-        }
+        const p = JSON.parse(fs.readFileSync(projConfigPath, 'utf8'));
+        _mergeConfig(config, p);
       } catch (e) {}
     }
   }
 
-  return Array.from(categories);
+  // 3. 环境变量覆盖与防腐校验
+  if (process.env.MEMHUB_IDLE_MINUTES) {
+    const envVal = parseInt(process.env.MEMHUB_IDLE_MINUTES, 10);
+    if (!isNaN(envVal) && envVal > 0) {
+      config.idleMinutes = envVal;
+    }
+  }
+
+  // 非法值兜底
+  if (typeof config.idleMinutes !== 'number' || isNaN(config.idleMinutes) || config.idleMinutes <= 0) {
+    config.idleMinutes = 120;
+  }
+
+  return config;
+}
+
+function _mergeConfig(target, source) {
+  if (!source || typeof source !== 'object') return;
+  if (typeof source.idleMinutes === 'number' && source.idleMinutes > 0) {
+    target.idleMinutes = source.idleMinutes;
+  }
+  if (source.scanRules && typeof source.scanRules === 'object') {
+    if (Array.isArray(source.scanRules.watchDirectories)) {
+      target.scanRules.watchDirectories = source.scanRules.watchDirectories;
+    }
+    if (Array.isArray(source.scanRules.include)) {
+      target.scanRules.include = source.scanRules.include;
+    }
+    if (Array.isArray(source.scanRules.exclude)) {
+      target.scanRules.exclude = source.scanRules.exclude;
+    }
+  }
+  if (Array.isArray(source.categories)) {
+    const set = new Set([...target.categories, ...source.categories]);
+    target.categories = Array.from(set);
+  }
+}
+
+/**
+ * 动态获取可用分类列表
+ */
+export function getCategories(projectPath = process.cwd()) {
+  const cfg = getConfig(projectPath);
+  return cfg.categories;
 }
 
 export const CATEGORIES = DEFAULT_CATEGORIES;
 
 export function ensureDirectories() {
-  if (!fs.existsSync(MEMORY_HUB_HOME)) {
-    fs.mkdirSync(MEMORY_HUB_HOME, { recursive: true });
+  if (!fs.existsSync(MEMHUB_HOME)) {
+    fs.mkdirSync(MEMHUB_HOME, { recursive: true });
   }
   if (!fs.existsSync(VAULT_DIR)) {
     fs.mkdirSync(VAULT_DIR, { recursive: true });
@@ -73,4 +136,3 @@ export function ensureDirectories() {
     }
   }
 }
-

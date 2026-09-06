@@ -3,11 +3,14 @@ import os from 'node:os';
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { AgentAdapter } from './base.js';
+import { PathFilter } from '../path-filter.js';
+import { getConfig } from '../config.js';
 
 export class OpenCodeAdapter extends AgentAdapter {
   constructor(customDbPath = null) {
     super('opencode');
     this.dbPath = customDbPath || path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
+    this._db = null;
   }
 
   isAvailable() {
@@ -18,13 +21,46 @@ export class OpenCodeAdapter extends AgentAdapter {
     if (!this.isAvailable()) {
       throw new Error(`OpenCode 数据库不存在: ${this.dbPath}`);
     }
-    return new DatabaseSync(this.dbPath, { readOnly: true });
+    if (!this._db) {
+      this._db = new DatabaseSync(this.dbPath, { readOnly: true });
+    }
+    return this._db;
   }
 
+  close() {
+    if (this._db) {
+      try {
+        this._db.close();
+      } catch (e) {}
+      this._db = null;
+    }
+  }
+
+  /**
+   * 扫描符合条件的候选会话
+   * 结合动态 idleMinutes 与 PathFilter 规则引擎（watchDirectories/include/exclude）
+   */
   scanCandidateSessions(options = {}) {
     if (!this.isAvailable()) return [];
     const limit = options.limit || 10;
     const excludeIds = options.excludeIds || new Set();
+
+    // 仅在未传入时才按需读取配置（避免冗余 I/O）
+    let idleMinutes = options.idleMinutes;
+    let scanRules = options.scanRules;
+
+    if (idleMinutes === undefined || !scanRules) {
+      const globalConfig = getConfig();
+      if (idleMinutes === undefined) idleMinutes = globalConfig.idleMinutes;
+      if (!scanRules) scanRules = globalConfig.scanRules;
+    }
+
+    const idleMs = (idleMinutes ?? 120) * 60 * 1000;
+    const forceScan = Boolean(options.force);
+    const now = Date.now();
+
+    // 构建路径过滤器
+    const filter = new PathFilter(scanRules);
 
     const db = this._getDb();
     const query = `
@@ -33,17 +69,22 @@ export class OpenCodeAdapter extends AgentAdapter {
       WHERE parent_id IS NULL
         AND title NOT LIKE '[ExoBrain]%'
         AND title NOT LIKE '[MemoryHub]%'
-        AND (time_updated < (? - 2 * 60 * 60 * 1000) OR ? = true)
+        AND title NOT LIKE '[MemHub]%'
+        AND (time_updated < (? - ?) OR ? = 1)
       ORDER BY time_updated DESC
       LIMIT ?
     `;
-    const forceScan = Boolean(options.force);
-    const now = Date.now();
-    const candidates = db.prepare(query).all(now, forceScan ? 1 : 0, limit * 2);
+    const candidates = db.prepare(query).all(now, idleMs, forceScan ? 1 : 0, limit * 4);
 
     const results = [];
     for (const c of candidates) {
       if (excludeIds.has(c.id)) continue;
+
+      // 路径规则与白名单/黑名单过滤
+      if (!filter.isMatch(c.directory)) {
+        continue;
+      }
+
       results.push({
         id: c.id,
         title: c.title,
@@ -52,6 +93,7 @@ export class OpenCodeAdapter extends AgentAdapter {
         timeUpdated: Number(c.time_updated),
         model: c.model
       });
+
       if (results.length >= limit) break;
     }
 

@@ -10,7 +10,7 @@ import {
   getStats 
 } from './storage.js';
 import { runOfflineScan } from './scanner.js';
-import { MEMORY_HUB_HOME, VAULT_DIR, BACKUP_DIR, DB_PATH } from './config.js';
+import { MEMHUB_HOME, VAULT_DIR, BACKUP_DIR, DB_PATH } from './config.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -19,24 +19,24 @@ const command = args[0];
 
 function printHelp() {
   console.log(`
-Memory Hub (hub) CLI - AI 编程知识中枢与工程长效记忆
+MemHub (memhub / mem-hub) CLI - AI 编程知识中枢与工程长效记忆
 
 用法:
-  hub scan [数量]           离线自动扫描超过 2 小时未活跃的历史 Session 并自动萃取入库
-  hub find <关键词>         全文检索历史避坑经验与架构决策 (支持 FTS5 Trigram 模糊匹配)
-  hub get <id>              查看某张知识卡片的完整详细内容与代码正文
-  hub list [条数]           查看最近沉淀的高密度知识索引列表
-  hub stats                 查看全局或项目维度的研发态势与知识资产统计
-  hub backup [路径]         执行 SQLite 原生 VACUUM INTO 无损原子热备份
-  hub export [目录]         将 SQLite 数据库无损导出为结构化 Markdown 目录树 (Obsidian兼容)
-  hub path                  打印知识库物理路径与数据库位置
+  memhub scan [数量]           离线自动扫描超过静默时间未活跃的历史 Session 并自动萃取入库
+  memhub find <关键词>         全文检索历史避坑经验与架构决策 (支持 FTS5 Trigram 模糊匹配)
+  memhub get <id>              查看某张知识卡片的完整详细内容与代码正文
+  memhub list [条数]           查看最近沉淀的高密度知识索引列表
+  memhub stats                 查看全局或项目维度的研发态势与知识资产统计
+  memhub backup [路径]         执行 SQLite 原生 VACUUM INTO 无损原子热备份
+  memhub export [目录]         将 SQLite 数据库无损导出为结构化 Markdown 目录树 (Obsidian兼容)
+  memhub path                  打印知识库物理路径与数据库位置
 `);
 }
 
 switch (command) {
   case 'scan': {
     const limit = parseInt(args[1], 10) || 2;
-    console.log(`🔍 开始离线扫描历史已结束（>2小时静默）的 OpenCode 会话...`);
+    console.log(`🔍 开始离线扫描历史已结束（静默完成态）的 OpenCode 会话...`);
     runOfflineScan(limit);
     break;
   }
@@ -45,7 +45,7 @@ switch (command) {
   case 'search': {
     const query = args.slice(1).join(' ');
     if (!query) {
-      console.log('请输入搜索关键词，例如: hub find Alpine');
+      console.log('请输入搜索关键词，例如: memhub find Alpine');
       process.exit(1);
     }
     const results = searchKnowledge(query, { limit: 5 });
@@ -62,7 +62,7 @@ switch (command) {
         }
         console.log('');
       });
-      console.log('提示: 输入 `hub get <id>` 查看完整正解代码与技术根因 (L2/L3 级)');
+      console.log('提示: 输入 `memhub get <id>` 查看完整正解代码与技术根因 (L2/L3 级)');
     }
     break;
   }
@@ -70,7 +70,7 @@ switch (command) {
   case 'get': {
     const id = args[1];
     if (!id) {
-      console.log('请输入知识卡片 ID，例如: hub get kb-xxxx');
+      console.log('请输入知识卡片 ID，例如: memhub get kb-xxxx');
       process.exit(1);
     }
     const card = getKnowledge(id);
@@ -96,7 +96,7 @@ switch (command) {
   case 'stats': {
     const project = args[1] || null;
     const stats = getStats({ project });
-    console.log(`\n📊 Memory Hub 研发资产与态势统计:`);
+    console.log(`\n📊 MemHub 研发资产与态势统计:`);
     console.log(`----------------------------------------`);
     console.log(`作用范围: ${stats.project}`);
     console.log(`有效知识总数: ${stats.total_knowledge_entries} 篇`);
@@ -145,8 +145,8 @@ switch (command) {
   }
 
   case 'path': {
-    console.log(`\nMemory Hub 物理路径配置:`);
-    console.log(`  • 根目录:   ${MEMORY_HUB_HOME}`);
+    console.log(`\nMemHub 物理路径配置:`);
+    console.log(`  • 根目录:   ${MEMHUB_HOME}`);
     console.log(`  • SQLite库: ${DB_PATH}`);
     console.log(`  • Vault导出: ${VAULT_DIR}`);
     console.log(`  • 归档目录: ${BACKUP_DIR}\n`);

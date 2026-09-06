@@ -1,11 +1,12 @@
 {
-  "name": "memory-hub",
-  "version": "0.2.0",
+  "name": "memhub",
+  "version": "0.2.1",
   "type": "module",
   "description": "The unified knowledge & memory hub for AI coding agents",
   "bin": {
+    "memhub": "./src/cli.js",
+    "mem-hub": "./src/cli.js",
     "memory-hub": "./src/index.js",
-    "hub": "./src/cli.js",
     "exobrain-mcp": "./src/index.js",
     "exo": "./src/cli.js"
   },
@@ -15,7 +16,8 @@
     "test:storage": "node tests/test-storage.js",
     "test:adapters": "node tests/test-adapters.js",
     "test:extractor": "node tests/test-extractor.js",
-    "test:mcp": "node tests/test-mcp-protocol.js"
+    "test:mcp": "node tests/test-mcp-protocol.js",
+    "test:path-filter": "node tests/test-path-filter.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0"
