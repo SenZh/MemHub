@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "exobrain": {
-      "command": "node",
-      "args": ["D:\\workspace\\v0\\src\\index.js"]
-    }
-  }
-}

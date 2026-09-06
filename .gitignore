@@ -15,3 +15,9 @@ Thumbs.db
 # Local Environment
 .env
 .env.local
+
+# IDE & Editor specific
+.cursor/
+.vscode/
+.idea/
+

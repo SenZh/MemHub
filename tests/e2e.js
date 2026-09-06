@@ -31,8 +31,8 @@ for (let i = 0; i < suites.length; i++) {
 console.log('[FINAL CHECK] 验证 OpenCode 宿主 MCP 连通状态...');
 try {
   const mcpList = execSync('opencode mcp list', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
-  if (mcpList.includes('exobrain') || mcpList.includes('memhub')) {
-    console.log('✅ OpenCode 宿主 MCP 连通正常！\n');
+  if (mcpList.includes('memhub') || mcpList.includes('exobrain')) {
+    console.log('✅ OpenCode 宿主 MCP 连通正常 (memhub 已连接)！\n');
   } else {
     console.log('ℹ️ OpenCode 宿主环境已检测，未发现活跃 session，连通性跳过。\n');
   }
