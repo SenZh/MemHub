@@ -22,7 +22,7 @@ import {
 const server = new Server(
   {
     name: 'memhub',
-    version: '0.2.1'
+    version: '0.1.0'
   },
   {
     capabilities: {
