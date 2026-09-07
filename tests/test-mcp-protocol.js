@@ -53,8 +53,9 @@ async function runTest() {
     clientInfo: { name: 'test-client', version: '1.0.0' }
   });
   console.log('初始化响应:', initRes.result?.serverInfo);
-  // 严格校验名称为 memhub
+  // 严格校验名称为 memhub 与版本
   assert.strictEqual(initRes.result?.serverInfo?.name, 'memhub', 'Server Name 必须精确为 memhub');
+  assert.strictEqual(initRes.result?.serverInfo?.version, '0.1.1', 'Server Version 必须精确为 0.1.1');
 
   console.log('\n--- 2. 发送 tools/list 获取注册工具并扫描工具描述防反弹 ---');
   const listRes = await sendRequest('tools/list');
@@ -62,11 +63,18 @@ async function runTest() {
   console.log('注册工具数量:', tools.length);
   const toolNames = tools.map(t => t.name);
   console.log('工具名列表:', toolNames);
+  // 核心 memhub_* 标准工具必须就绪
+  assert(toolNames.includes('memhub_save'), '必须包含核心工具 memhub_save');
+  assert(toolNames.includes('memhub_search'), '必须包含核心工具 memhub_search');
+  assert(toolNames.includes('memhub_get'), '必须包含核心工具 memhub_get');
+  assert(toolNames.includes('memhub_recent'), '必须包含核心工具 memhub_recent');
+
+  // 兼容别名必须就绪
   assert(toolNames.includes('hub_record_knowledge'));
   assert(toolNames.includes('hub_search_knowledge'));
   assert(toolNames.includes('hub_get_knowledge'));
   assert(toolNames.includes('hub_list_recent'));
-  assert(toolNames.includes('exo_record_knowledge')); // 向后兼容
+  assert(toolNames.includes('exo_record_knowledge'));
 
   // 严密断言：所有工具描述中不得出现 Memory Hub 残留
   tools.forEach(t => {
@@ -74,16 +82,18 @@ async function runTest() {
   });
   console.log('   ✅ 工具描述防反弹扫描通过 (无 Memory Hub 残留)');
 
-  console.log('\n--- 3. 调用 hub_record_knowledge 记录知识 ---');
+  console.log('\n--- 3. 调用 memhub_save 记录长效工程记忆 ---');
   const recordRes = await sendRequest('tools/call', {
-    name: 'hub_record_knowledge',
+    name: 'memhub_save',
     arguments: {
       title: '[SpringSecurity6] 升级后 SecurityFilterChain 循环依赖解耦方案',
       category: 'decisions',
       tags: ['spring', 'security', 'java', '循环依赖'],
+      context: '升级 Spring Boot 3.2 之后，自定义 UserDetailsService 注入导致循环依赖',
       symptom: '升级到 Spring Boot 3.2 之后，自定义 UserDetailsService 注入 AuthenticationManager 导致 BeanCurrentlyInCreationException',
       root_cause: 'Spring Security 6 移除了默认的全局 AuthenticationManagerConfigurer，改由 SecurityFilterChain 依赖注入，造成循环链条',
       solution: '采用 @Lazy 注入 AuthenticationManager，或改用 AuthenticationConfiguration.getAuthenticationManager() 获取单例',
+      guardrails: ['严禁在 Filter 构造器中直接注入 AuthenticationManager'],
       related_files: ['SecurityConfig.java']
     }
   });
@@ -93,23 +103,24 @@ async function runTest() {
   assert(recordData.success === true);
   const createdId = recordData.id;
 
-  console.log('\n--- 4. 调用 hub_search_knowledge (验证渐进式 L1 检索与 instruction 引导) ---');
+  console.log('\n--- 4. 调用 memhub_search (验证渐进式 L1 检索与 instruction 引导) ---');
   const searchRes = await sendRequest('tools/call', {
-    name: 'hub_search_knowledge',
+    name: 'memhub_search',
     arguments: {
-      query: '循环依赖'
+      query: '循环依赖',
+      tags: ['spring', 'security']
     }
   });
   console.log('Search 工具响应:\n' + searchRes.result?.content?.[0]?.text);
   assert(!searchRes.result?.isError);
   const searchPayload = JSON.parse(searchRes.result?.content?.[0]?.text);
   assert(searchPayload.total_hits > 0);
-  assert(searchPayload.instruction.includes('hub_get_knowledge')); // 验证 instruction 引导
+  assert(searchPayload.instruction.includes('memhub_get')); // 验证 instruction 引导已升级为 memhub_get
   assert(searchPayload.results.some(r => r.id === createdId));
 
-  console.log('\n--- 5. 调用 hub_get_knowledge (第二阶段按需拉取完整 L2/L3 代码详情) ---');
+  console.log('\n--- 5. 调用 memhub_get (第二阶段按需拉取完整 L2/L3 代码详情) ---');
   const getRes = await sendRequest('tools/call', {
-    name: 'hub_get_knowledge',
+    name: 'memhub_get',
     arguments: {
       ids: [createdId]
     }
@@ -118,9 +129,9 @@ async function runTest() {
   assert(!getRes.result?.isError);
   assert(getRes.result?.content?.[0]?.text.includes('AuthenticationConfiguration'));
 
-  console.log('\n--- 6. 调用 hub_list_recent ---');
+  console.log('\n--- 6. 调用 memhub_recent ---');
   const recentRes = await sendRequest('tools/call', {
-    name: 'hub_list_recent',
+    name: 'memhub_recent',
     arguments: { limit: 3 }
   });
   console.log('List 工具响应:\n' + recentRes.result?.content?.[0]?.text);

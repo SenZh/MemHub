@@ -43,12 +43,36 @@ switch (command) {
 
   case 'find':
   case 'search': {
-    const query = args.slice(1).join(' ');
+    const rawArgs = args.slice(1);
+    let project = null;
+    let category = null;
+    const tags = [];
+    const queryTokens = [];
+
+    for (let i = 0; i < rawArgs.length; i++) {
+      const arg = rawArgs[i];
+      if (arg === '--project' || arg === '-w' || arg === '--workspace') {
+        project = rawArgs[++i];
+      } else if (arg === '--category' || arg === '-c') {
+        category = rawArgs[++i];
+      } else if (arg === '--tag' || arg === '-t') {
+        tags.push(rawArgs[++i]);
+      } else {
+        queryTokens.push(arg);
+      }
+    }
+
+    const query = queryTokens.join(' ');
     if (!query) {
-      console.log('请输入搜索关键词，例如: memhub find Alpine');
+      console.log('请输入搜索关键词，例如: memhub find Alpine --project bindCenter --tag docker');
       process.exit(1);
     }
-    const results = searchKnowledge(query, { limit: 5 });
+    const results = searchKnowledge(query, { 
+      limit: 5,
+      project,
+      category,
+      tags
+    });
     if (results.length === 0) {
       console.log(`未找到与 "${query}" 相关的知识。`);
     } else {

@@ -32,7 +32,30 @@ export const DB_PATH = path.join(MEMHUB_HOME, 'memory.db');
 export const VAULT_DIR = path.join(MEMHUB_HOME, 'vault');
 export const BACKUP_DIR = path.join(MEMHUB_HOME, 'backups');
 
-export const DEFAULT_CATEGORIES = ['learnings', 'decisions', 'solutions'];
+export const DEFAULT_CATEGORIES = ['learnings', 'decisions', 'patterns'];
+
+/**
+ * 分类别名归一化映射
+ * 保证历史别名与近义词（如 solutions -> patterns, pitfall -> learnings）平滑归一
+ * 非法分类统一收敛为默认顶级分类 'learnings'
+ */
+export function normalizeCategory(rawCategory) {
+  if (!rawCategory || typeof rawCategory !== 'string') return 'learnings';
+  const lower = rawCategory.trim().toLowerCase();
+  
+  if (lower === 'solutions' || lower === 'solution' || lower === 'patterns' || lower === 'pattern' || lower === 'guide') {
+    return 'patterns';
+  }
+  if (lower === 'gotchas' || lower === 'gotcha' || lower === 'pitfall' || lower === 'pitfalls' || lower === 'troubleshoot' || lower === 'learnings' || lower === 'learning') {
+    return 'learnings';
+  }
+  if (lower === 'decisions' || lower === 'decision' || lower === 'adr' || lower === 'rule' || lower === 'rules') {
+    return 'decisions';
+  }
+  
+  // 严格安全收敛：未识别的非法枚举统一兜底为 learnings，杜绝脏数据入库
+  return 'learnings';
+}
 
 /**
  * 读取完整的 MemHub 配置 (合并全局与项目级配置，并解析环境变量)

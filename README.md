@@ -19,20 +19,26 @@
 ## 🚀 核心特性
 
 - 🧠 **借宿主算力提炼（零 API Key 依赖）**：利用原会话自身上下文与模型参数执行知识抽取，吃 Prompt Cache 近乎零额外费用。
-- ⚡ **单文件 SQLite 工业存储内核**：
+- ⚡ **单文件 SQLite 工业存储内核 + DDL 自愈**：
   - 核心数据存放在单文件 SQLite（`~/.memhub/memory.db`）中，自带 WAL 事务锁与 FTS5 倒排索引，杜绝多文件 I/O 碎片与并发写损坏；
+  - 内置 DDL 热迁移自愈引擎，自动感知新字段与老库升级；
   - 原生支持 `VACUUM INTO` 无损热备份归档与一键导出 Obsidian 兼容的 Markdown 目录。
-- 🔍 **两阶段渐进式披露协议 (Progressive Disclosure)**：
-  - **阶段一（检索）**：仅返回单条 ~30-50 Tokens 的高密度索引摘要，并带引导指令，防止 Token 爆炸与注意力迷失；
-  - **阶段二（展开详情）**：大模型确认命中后，按需批量拉取深度技术根因剖析与可运行代码块。
-- 🛡️ **前置查重与版本演进防线**：
-  - 标题哈希前置防重，彻底消灭重复卡片堆积；
-  - 支持 `supersedes` 显式版本演进，新方案入库自动置换历史废弃版本。
+- 🧩 **三大基石分类与结构化要素清单**：
+  - 彻底收敛为三大正交顶级分类：`learnings`（排错避坑）、`decisions`（架构决策 ADR）、`patterns`（最佳实践模板）；
+  - 彻底补全业务操作背景、底层因果、已排除误区清单、受影响拓扑面与架构红线，消灭“半拉子废纸”。
+- 🎯 **工作区隔离与多标签交集检索**：
+  - 支持 `(project = ? OR project = 'global')` 物理隔离无关项目，同时穿透全局通用经验；
+  - 基于 SQLite 原生 `json_each` 实现标签多值交集（AND）参数化精准收窄。
+- 🤖 **极简动宾 MCP 协议与大模型自主认知**：
+  - 核心工具全面升级为 `memhub_save`（存）、`memhub_search`（搜）、`memhub_get`（取）、`memhub_recent`（历）；
+  - 彻底消灭“叫 knowledge”的心智割裂，自解释 Schema 让大模型自主形成两阶段防爆 Token 行为。
+- 🛡️ **物理终态成功证据门禁 (Truth Verification Gate)**：
+  - 提炼引擎前置检验退出码 0、测试通过或服务就绪证据，严禁记录未经验证的猜测。
 - 🕒 **可配置静默时间与会话目录过滤引擎**：
   - 自动判定会话静默完成态（默认 120 分钟未更新判定为已结束，支持动态配置与环境变量覆盖）；
   - 路径过滤引擎提供 `watchDirectories` 根目录限制、`exclude` 黑名单（最高优先）与 `include` 白名单确认。
-- 🔒 **敏感凭据前置脱敏 (Secret Scrubbing)**：
-  - 入库前自动匹配清洗常见云厂商 AK/SK、JWT、密码、私钥，替换为 `***REDACTED***`。
+- 🔒 **敏感凭据深度递归脱敏 (Secret Scrubbing)**：
+  - 入库前自动匹配清洗标量字段与多级数组要素中的 AK/SK、JWT、密码、私钥，替换为 `***REDACTED***`。
 
 ---
 
@@ -99,14 +105,17 @@ opencode mcp list
 ## 💻 命令行 CLI 用法 (`memhub` / `mem-hub`)
 
 ```bash
-# 查看最近沉淀的知识索引
-memhub list
-
-# 毫秒级全文检索历史避坑经验与架构决策
+# 全域盲查（最常用，0 门槛）
 memhub find "Alpine glibc"
 
-# 查看某张卡片的完整代码与技术根因
+# 多维高级检索：限定工作区(项目) + 过滤标签 + 指定分类
+memhub find "批量锁" --project pay-center --tag redisson --category learnings
+
+# 查看某张卡片的完整代码与分类专属详情 (L2 级展开)
 memhub get kb-c3ffcbe1
+
+# 查看最近沉淀的知识索引（支持按项目与标签过滤）
+memhub list
 
 # 离线扫描已结束（超过静默时间）的历史会话并自动萃取入库
 memhub scan
@@ -123,6 +132,19 @@ memhub export
 # 打印当前知识库物理文件路径
 memhub path
 ```
+
+---
+
+## 🤖 MCP 工具与大模型自主认知契约
+
+MemHub 遵循“渐进式披露 (Progressive Disclosure)”与“自解释认知契约”，向大模型暴露 4 个标准 MCP 工具（以 `memhub_*` 为标准命名空间，并完全向下兼容 `hub_*` 与 `exo_*`）：
+
+| 标准 MCP 工具名 | 角色与认知定位 | 大模型何时调用？怎么用？ |
+|:---|:---|:---|
+| **`memhub_search`** | **渐进式检索 - 阶段一**<br>(~50 Tokens 超轻量探测) | **动代码前必调**。输入 `query`（可带 `project`、`tags`、`category`），返回极简强指纹摘要。大模型负责先在上下文比对确认是否吻合。 |
+| **`memhub_get`** | **渐进式检索 - 阶段二**<br>(确定性高清 Markdown) | **确认吻合后再调**。传入 `ids: ["kb-xxx"]` 展开完整卡片（含业务背景、深层因果、验证正解、已排除误区与架构红线）。 |
+| **`memhub_save`** | **主动长效资产沉淀**<br>(工程认知持久化) | **攻克排错(learnings)、敲定决策(decisions)、写出模板(patterns)后调用**。强制要求填写业务背景(`context`)与正解(`solution`)，严禁脑补。 |
+| **`memhub_recent`** | **最近记忆轨迹速览**<br>(新会话破冰) | **新开会话、接手新项目时调用**。快速拉取最近演进，支持按 `project`（自动穿透 global 资产）和 `tags` 过滤。 |
 
 ---
 
