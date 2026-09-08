@@ -23,9 +23,33 @@ function runMigrations(db) {
     if (!colSet.has('extra_payload')) {
       db.exec("ALTER TABLE knowledge_items ADD COLUMN extra_payload TEXT;");
     }
+    if (!colSet.has('topic_fingerprint')) {
+      db.exec("ALTER TABLE knowledge_items ADD COLUMN topic_fingerprint TEXT;");
+    }
 
     // 幂等刷写存量历史分类 solutions -> patterns
     db.exec("UPDATE knowledge_items SET category = 'patterns' WHERE category = 'solutions';");
+  } catch (e) {
+    // 忽略迁移过程中非致命错误
+  }
+
+  // session_tracking 老库补列（统一为 scanner-service 与多卡所需的完整 schema）
+  try {
+    const stCols = db.prepare("PRAGMA table_info(session_tracking)").all();
+    const stSet = new Set(stCols.map(c => c.name));
+    const addIfMissing = (col, ddl) => {
+      if (!stSet.has(col)) db.exec(`ALTER TABLE session_tracking ADD COLUMN ${ddl};`);
+    };
+    addIfMissing('source_agent', 'source_agent TEXT');
+    addIfMissing('project_path', 'project_path TEXT');
+    addIfMissing('session_title', 'session_title TEXT');
+    addIfMissing('card_id', 'card_id TEXT');
+    addIfMissing('attempts', 'attempts INTEGER DEFAULT 0');
+    addIfMissing('locked_until', 'locked_until INTEGER DEFAULT 0');
+    addIfMissing('last_error', 'last_error TEXT');
+    addIfMissing('updated_at', 'updated_at INTEGER DEFAULT 0');
+    // 老库 source 列可能 NOT NULL 但无默认值，scanner 写入需显式给；此处幂等回填 status 兜底
+    db.exec("UPDATE session_tracking SET status = COALESCE(NULLIF(status,''), 'PENDING');");
   } catch (e) {
     // 忽略迁移过程中非致命错误
   }
@@ -55,6 +79,7 @@ export function getDatabase() {
       summary TEXT NOT NULL,
       tags TEXT NOT NULL,
       related_files TEXT,
+      topic_fingerprint TEXT,
       context_text TEXT,
       root_cause TEXT,
       solution_core TEXT NOT NULL,
@@ -82,14 +107,22 @@ export function getDatabase() {
       tokenize = 'trigram'
     );
 
-    -- 3. 离线会话扫描与状态机
+    -- 3. 离线会话扫描与状态机（权威 schema，scanner-service 复用；老库由 runMigrations 幂等补列）
     CREATE TABLE IF NOT EXISTS session_tracking (
       session_id TEXT PRIMARY KEY,
-      source TEXT NOT NULL,
-      project TEXT NOT NULL,
-      status TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'opencode',
+      source_agent TEXT,
+      project TEXT NOT NULL DEFAULT '',
+      project_path TEXT,
+      session_title TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING',
       extracted_kb_ids TEXT,
-      time_processed INTEGER NOT NULL
+      card_id TEXT,
+      attempts INTEGER DEFAULT 0,
+      locked_until INTEGER DEFAULT 0,
+      last_error TEXT,
+      time_processed INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL DEFAULT 0
     );
   `);
 
@@ -100,6 +133,31 @@ export function getDatabase() {
 
 export function generateCardId() {
   return 'kb-' + crypto.randomBytes(4).toString('hex');
+}
+
+/**
+ * 计算"主题指纹"(topic fingerprint)：同一记忆主题的可覆盖定位键的一环。
+ * 从 title 与 tags 中抽取客观实体词（错误码、类名、技术栈、文件名、功能词），
+ * 统一小写、去重、排序后拼接，再取 SHA-256 前 12 位十六进制。
+ * 优点：同分类同主题的再次沉淀可稳定命中同一指纹 → 触发 upsert 覆盖而非新增；
+ * 而同一 session 内不同主题会得到不同指纹 → 互不误覆盖。
+ */
+export function computeTopicFingerprint(title = '', tags = []) {
+  const tagList = Array.isArray(tags) ? tags.map(t => String(t).trim().toLowerCase()).filter(Boolean) : [];
+  // 从标题中粗切出疑似实体词簇：以分隔符拆分，剔除通用连接词与过长/过短片段
+  const stopTokens = new Set(['在', '的', '与', '和', '或', '以及', '问题', '解决', '方案', '使用', '通过',
+    '系统', '模块', '场景', '配置', '修复', '排错', '避坑', '架构', '设计', '最佳', '实践', '报错',
+    'the', 'and', 'for', 'with', 'into', 'from', 'this', 'that', 'opencode', 'memhub']);
+  const titleTokens = (title || '')
+    .toLowerCase()
+    .split(/[\s\-_/:：·，,。.()[\]【】]+/)
+    .map(s => s.trim())
+    .filter(s => s.length >= 2 && s.length <= 32 && !stopTokens.has(s));
+
+  const entities = [...new Set([...tagList, ...titleTokens])].sort();
+  if (entities.length === 0) return '';
+  const joined = entities.join('|');
+  return crypto.createHash('sha256').update(joined).digest('hex').slice(0, 12);
 }
 
 /**
@@ -122,7 +180,34 @@ export function findDuplicateByTitle(title, project = null) {
 }
 
 /**
- * 主动记录一条知识（写入单文件 SQLite，字段分层，前置查重与版本演进）
+ * 定位"同类型多次抽取应更新覆盖"的目标卡片。
+ * 定位键 = session_id + category + topic_fingerprint（可叠加 project 收窄）。
+ * 命中返回 active 记录，未命中返回 undefined。
+ */
+export function findBySessionCategoryTopic(sessionId, category, fingerprint, project = null) {
+  if (!sessionId || !category || !fingerprint) return undefined;
+  const db = getDatabase();
+  const normalizedCat = normalizeCategory(category);
+  let sql = `
+    SELECT id, title, category, project, topic_fingerprint
+    FROM knowledge_items
+    WHERE session_id = ? AND category = ? AND topic_fingerprint = ? AND status = 'active'
+  `;
+  const params = [sessionId, normalizedCat, fingerprint];
+  if (project) {
+    sql += ` AND project = ?`;
+    params.push(project);
+  }
+  sql += ` LIMIT 1`;
+  const stmt = db.prepare(sql);
+  return stmt.get(...params);
+}
+
+/**
+ * 主动记录一条知识（写入单文件 SQLite，字段分层，前置查重/指纹 upsert 与版本演进）
+ * @param {Object} params
+ * @param {string} [params.mode='insert'] - 'insert' 走现状标题查重；'upsert' 按
+ *        session_id+category+topic_fingerprint 定位，命中则原地 UPDATE 覆盖，未命中则插入。
  */
 export function recordKnowledge(params) {
   const db = getDatabase();
@@ -186,7 +271,75 @@ export function recordKnowledge(params) {
   const projectName = params.project ? scrubSecrets(params.project.trim()) : context.projectName;
   const now = Date.now();
 
-  // 3. 前置查重逻辑（防重复录入）
+  // 2.5 计算主题指纹（同 session 同分类同主题覆盖定位；不同主题互不误覆盖）
+  const topicFingerprint = params.topic_fingerprint || computeTopicFingerprint(title, tags);
+
+  // 3a. upsert 模式：优先按 session_id+category+topic_fingerprint 定位；若指纹因补充
+  //      标签漂移而未命中，则回退按"同 session+category+完全同 title"兜底定位。
+  //      命中一律原地 UPDATE 覆盖（这是同类型多次抽取应更新覆盖而非新增的核心语义）。
+  const mode = params.mode === 'upsert' ? 'upsert' : 'insert';
+  const sessionIdForLocate = context.sessionId || params.session_id;
+  let located = null;
+  if (mode === 'upsert' && sessionIdForLocate && topicFingerprint) {
+    located = findBySessionCategoryTopic(sessionIdForLocate, category, topicFingerprint, projectName);
+    if (!located && title) {
+      const dup = findDuplicateByTitle(title, projectName);
+      // 仅当该同名卡正好也属于本 session 时才视作同主题覆盖，避免跨 session 误覆盖
+      if (dup && dup.id) {
+        const row = db.prepare(`SELECT session_id FROM knowledge_items WHERE id = ?`).get(dup.id);
+        if (row && row.session_id === sessionIdForLocate) located = dup;
+      }
+    }
+    if (located && !params.supersedes && !params.force) {
+      const updateStmt = db.prepare(`
+        UPDATE knowledge_items SET
+          project = ?, category = ?, title = ?, summary = ?, tags = ?,
+          related_files = ?, context_text = ?, root_cause = ?, solution_core = ?,
+          code_payload = ?, extra_payload = ?, topic_fingerprint = ?,
+          session_id = ?, source_agent = ?, git_branch = ?, git_commit = ?,
+          status = 'active', time_updated = ?
+        WHERE id = ?
+      `);
+      updateStmt.run(
+        projectName,
+        category,
+        title,
+        summary,
+        JSON.stringify(tags),
+        JSON.stringify(relatedFiles),
+        contextText,
+        rootCause,
+        solutionCore,
+        codePayload,
+        extraPayloadStr,
+        topicFingerprint,
+        sessionIdForLocate,
+        context.sourceAgent,
+        context.gitBranch || '',
+        context.gitCommit || '',
+        now,
+        located.id
+      );
+      // 同步重建 FTS 索引（DELETE + INSERT）
+      db.prepare(`DELETE FROM knowledge_fts WHERE id = ?`).run(located.id);
+      db.prepare(`INSERT INTO knowledge_fts (id, title, tags, summary, solution_core) VALUES (?, ?, ?, ?, ?)`)
+        .run(located.id, title, tags.join(' '), summary, solutionCore);
+
+      return {
+        success: true,
+        id: located.id,
+        title,
+        category,
+        tags,
+        project: projectName,
+        session_id: sessionIdForLocate,
+        updated: true,
+        message: `按 session+category+主题定位命中已有卡片 [${located.id}]，已原地更新覆盖。`
+      };
+    }
+  }
+
+  // 3b. 非 upsert / upsert 未命中时的标题精确查重（防同名重复录入）
   const existing = findDuplicateByTitle(title, projectName);
   if (existing && !params.supersedes && !params.force) {
     return {
@@ -214,12 +367,12 @@ export function recordKnowledge(params) {
   // 5. 写入核心实体表 (knowledge_items)
   const insertStmt = db.prepare(`
     INSERT INTO knowledge_items (
-      id, project, category, title, summary, tags, related_files,
+      id, project, category, title, summary, tags, related_files, topic_fingerprint,
       context_text, root_cause, solution_core, code_payload, extra_payload,
       session_id, source_agent, git_branch, git_commit, status,
       superseded_by, supersedes, access_count, time_created, time_updated
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, 'active',
       null, ?, 0, ?, ?
@@ -234,6 +387,7 @@ export function recordKnowledge(params) {
     summary,
     JSON.stringify(tags),
     JSON.stringify(relatedFiles),
+    topicFingerprint,
     contextText,
     rootCause,
     solutionCore,
@@ -461,6 +615,22 @@ export function getKnowledge(id) {
       Array.isArray(extra.guardrails) && extra.guardrails.length > 0
         ? extra.guardrails.map(g => `- ⚠️ ${g}`).join('\n')
         : '- 暂无特殊硬约束'
+    );
+  } else if (cat === 'business') {
+    lines.push(
+      '## 🎯 业务领域与背景 (Domain Context)',
+      item.context_text || item.summary || '无详细业务领域背景',
+      '',
+      '## 📜 核心业务规则与口径 (Business Rules & Logic)',
+      item.code_payload || item.solution_core || '无详细规则描述',
+      '',
+      '## 🔄 状态流转与边界时序 (Lifecycle & State Machine)',
+      extra.mechanism || extra.lifecycle || extra.boundaries || '按标准业务流程流转',
+      '',
+      '## ⛔ 业务防踩坑与资损红线 (Risk Guardrails)',
+      Array.isArray(extra.guardrails) && extra.guardrails.length > 0
+        ? extra.guardrails.map(g => `- ⚠️ ${g}`).join('\n')
+        : (extra.pitfalls ? `- ⚠️ ${extra.pitfalls}` : '- 暂无特殊资损硬红线')
     );
   } else {
     // patterns

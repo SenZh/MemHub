@@ -10,6 +10,12 @@ import {
   getStats 
 } from './storage.js';
 import { runOfflineScan } from './scanner.js';
+import { 
+  runDaemon, 
+  stopDaemon, 
+  getDaemonStatus, 
+  showDaemonLogs 
+} from './daemon.js';
 import { MEMHUB_HOME, VAULT_DIR, BACKUP_DIR, DB_PATH } from './config.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,7 +28,8 @@ function printHelp() {
 MemHub (memhub / mem-hub) CLI - AI 编程知识中枢与工程长效记忆
 
 用法:
-  memhub scan [数量]           离线自动扫描超过静默时间未活跃的历史 Session 并自动萃取入库
+  memhub scan [数量]           离线扫描超过静默时间未活跃的历史 Session 跟踪状态
+  memhub daemon [start|stop|status|logs]  后台常驻定时提炼守护服务 (默认后台运行)
   memhub find <关键词>         全文检索历史避坑经验与架构决策 (支持 FTS5 Trigram 模糊匹配)
   memhub get <id>              查看某张知识卡片的完整详细内容与代码正文
   memhub list [条数]           查看最近沉淀的高密度知识索引列表
@@ -30,14 +37,74 @@ MemHub (memhub / mem-hub) CLI - AI 编程知识中枢与工程长效记忆
   memhub backup [路径]         执行 SQLite 原生 VACUUM INTO 无损原子热备份
   memhub export [目录]         将 SQLite 数据库无损导出为结构化 Markdown 目录树 (Obsidian兼容)
   memhub path                  打印知识库物理路径与数据库位置
+
+daemon 守护指令:
+  memhub daemon                默认后台静默启动守护进程
+  memhub daemon start          后台启动守护进程
+  memhub daemon stop           停止正在后台运行的守护进程
+  memhub daemon status         查看后台守护进程运行状态与 PID
+  memhub daemon logs [-n 30]   查看守护进程最近输出的日志
+
+daemon 可选参数:
+  --foreground, -f    强制前台运行并输出控制台日志
+  --interval <分钟>   轮询周期 (默认 30)
+  --window-days <N>   扫描窗口: 只处理最近 N 天更新的会话 (默认 7)
+  --idle <分钟>       静默阈值: 距现在超过 N 分钟 (默认 120)
+  --limit <条数>      单轮最多处理会话数 (默认 3)
+  --once              只执行一轮后退出
+  --dry-run           测试桩模式 (不真发 HTTP POST)
+  --force             强制重新处理已跳过的会话
 `);
 }
 
 switch (command) {
   case 'scan': {
     const limit = parseInt(args[1], 10) || 2;
-    console.log(`🔍 开始离线扫描历史已结束（静默完成态）的 OpenCode 会话...`);
+    console.log(`🔍 开始扫描历史已结束（静默完成态）的 OpenCode 会话...`);
     runOfflineScan(limit);
+    break;
+  }
+
+  case 'daemon': {
+    const subAction = args[1];
+
+    if (subAction === 'stop') {
+      stopDaemon();
+      break;
+    }
+
+    if (subAction === 'status') {
+      getDaemonStatus();
+      break;
+    }
+
+    if (subAction === 'logs') {
+      let lines = 30;
+      const nIdx = args.indexOf('-n');
+      if (nIdx !== -1 && args[nIdx + 1]) {
+        lines = parseInt(args[nIdx + 1], 10) || 30;
+      }
+      showDaemonLogs({ lines });
+      break;
+    }
+
+    // 排除 start 关键字后的其余参数
+    const rest = (subAction === 'start') ? args.slice(2) : args.slice(1);
+    const cliOpts = { once: false, foreground: false };
+
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === '--foreground' || a === '-f') cliOpts.foreground = true;
+      else if (a === '--interval') cliOpts.interval = parseInt(rest[++i], 10) || undefined;
+      else if (a === '--window-days') cliOpts.windowDays = parseInt(rest[++i], 10) || undefined;
+      else if (a === '--idle') cliOpts.idleMinutes = parseInt(rest[++i], 10) || undefined;
+      else if (a === '--limit') cliOpts.limit = parseInt(rest[++i], 10) || undefined;
+      else if (a === '--once') cliOpts.once = true;
+      else if (a === '--dry-run') cliOpts.dryRun = true;
+      else if (a === '--force') cliOpts.force = true;
+    }
+
+    runDaemon(cliOpts);
     break;
   }
 

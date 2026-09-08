@@ -59,11 +59,16 @@ export class OpenCodeAdapter extends AgentAdapter {
     const forceScan = Boolean(options.force);
     const now = Date.now();
 
+    // 可选"最近 N 天窗口"上界：仅当显式传入 windowDays（daemon 调度）时启用，
+    // 将扫描范围收窄为 [now - windowDays, now - idleMs]；手动 scan 不传则维持原逻辑。
+    const windowDays = options.windowDays;
+    const windowMs = typeof windowDays === 'number' && windowDays > 0 ? windowDays * 86400000 : null;
+
     // 构建路径过滤器
     const filter = new PathFilter(scanRules);
 
     const db = this._getDb();
-    const query = `
+    let sql = `
       SELECT id, title, directory, time_created, time_updated, model
       FROM session
       WHERE parent_id IS NULL
@@ -71,10 +76,17 @@ export class OpenCodeAdapter extends AgentAdapter {
         AND title NOT LIKE '[MemoryHub]%'
         AND title NOT LIKE '[MemHub]%'
         AND (time_updated < (? - ?) OR ? = 1)
-      ORDER BY time_updated DESC
-      LIMIT ?
     `;
-    const candidates = db.prepare(query).all(now, idleMs, forceScan ? 1 : 0, limit * 4);
+    const params = [now, idleMs, forceScan ? 1 : 0];
+    // 上界窗口：time_updated 不得早于 now - windowDays（只扫最近 windowDays 天内的会话）
+    if (windowMs && !forceScan) {
+      sql += ` AND time_updated >= ?`;
+      params.push(now - windowMs);
+    }
+    sql += ` ORDER BY time_updated DESC LIMIT ?`;
+    params.push(limit * 4);
+
+    const candidates = db.prepare(sql).all(...params);
 
     const results = [];
     for (const c of candidates) {

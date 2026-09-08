@@ -122,4 +122,11 @@ export class PathFilter {
     // 若未配置 include，默认放行
     return true;
   }
+
+  /**
+   * 语义别名：等同于 isMatch(targetDir)
+   */
+  isAllowed(targetDir) {
+    return this.isMatch(targetDir);
+  }
 }

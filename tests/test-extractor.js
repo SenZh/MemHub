@@ -19,31 +19,70 @@ const failTexts = [
 // 无终态成功证据 -> 严禁提取，必须返回 null
 const blockedRes = KnowledgeExtractor.extract(failSession, failTexts);
 assert(blockedRes === null, '未见成功证据的会话必须被门禁拦截！');
-console.log('   ✅ 未通过成功证据门禁拦截通过');
+assert(KnowledgeExtractor.verifyTruthGate(failTexts) === false);
+assert(KnowledgeExtractor.verifyTruthGate(['npm test', 'all tests passed']) === true);
+console.log('   ✅ 物理终态成功证据门禁检验通过');
 
-// 3. 测试典型排错特征提炼 (带成功证据)
-console.log('3. 验证排错场景启发式提炼 (带终态验证成功证据)...');
+// 3. 验证无 LLM 介入时坚决不捏造离线假卡
+console.log('3. 验证无 LLM 时坚决不捏造硬编码假卡 (杜绝垃圾数据污染)...');
 const mockSession = {
   id: 'ses-test-1',
   title: 'workbuddy 插件模型列表排查',
   projectPath: 'D:/workspace/test'
 };
 const mockTexts = [
-  'workbuddy 插件模型列表怎么来的？',
-  '调查发现 workbuddy.so 无法 push 到 git 仓库。',
-  '因为 .gitignore 第 8 行忽略了 plugins/cpa-workbuddy/**/*.so，必须用 git add -f 提交。执行 git add -f 之后成功推送，测试通过！'
+  '调查发现 .gitignore 导致文件无法 push。',
+  '使用 git add -f 之后成功推送，测试通过！'
 ];
+const offlineExtract = KnowledgeExtractor.extract(mockSession, mockTexts);
+assert(offlineExtract === null, '离线未接入 LLM 时严禁凭空伪造卡片内容！');
+const offlineAll = KnowledgeExtractor.extractAll(mockSession, mockTexts);
+assert(Array.isArray(offlineAll) && offlineAll.length === 0, '离线 extractAll 必须返回空列表');
+console.log('   ✅ 离线硬编码假卡彻底废除断言通过');
 
-const extracted = KnowledgeExtractor.extract(mockSession, mockTexts);
-assert(extracted !== null);
-assert(extracted.category === 'learnings');
-assert(extracted.title.includes('[Go/Workbuddy]'));
-assert(extracted.tags.includes('git-add-f'));
-assert(extracted.session_id === 'ses-test-1');
-assert(extracted.context.includes('CGO 动态链接库'));
-assert(Array.isArray(extracted.ineffective_attempts));
-console.log('   - 提炼出的标题:', extracted.title);
-console.log('   - 提炼出的标签:', extracted.tags);
-console.log('   ✅ 领域提炼层断言通过');
+// 4. 验证 parseLLMExtraction 解析宿主 LLM 返回的高质量结构化卡片
+console.log('4. 验证 parseLLMExtraction 解析宿主 LLM 多卡输出...');
+const llmJsonOutput = `
+基于会话分析，提炼出以下两项具有长期复用价值的暗知识：
+\`\`\`json
+[
+  {
+    "category": "learnings",
+    "title": "[Docker/Alpine] glibc缺失致canvas加载崩溃 -> 改用debian-slim或加libc6-compat",
+    "tags": ["docker", "alpine", "glibc", "canvas"],
+    "context": "在 Alpine 基础镜像部署带图形渲染的服务",
+    "symptom": "Error: Loading dynamic library failed: glibc not found",
+    "root_cause": "Alpine 默认使用 musl libc 而非 glibc",
+    "solution": "在 Dockerfile 中安装 libc6-compat 或将基础镜像切换为 node:20-bookworm-slim",
+    "topic_fingerprint": "docker-alpine-glibc"
+  },
+  {
+    "category": "decisions",
+    "title": "[架构决策/存储] 决定将 Redis 迁移至独立 Docker 容器的取舍",
+    "tags": ["redis", "architecture", "docker"],
+    "context": "解耦单体服务，保障缓存可用性",
+    "solution": "拆分 docker-compose 并配置健康检查",
+    "topic_fingerprint": "docker-redis-split"
+  }
+]
+\`\`\`
+已完成分析。
+`;
+
+const parsedCards = KnowledgeExtractor.parseLLMExtraction(llmJsonOutput, { id: 'ses-llm-1', projectPath: 'D:/proj' });
+assert(Array.isArray(parsedCards) && parsedCards.length === 2, '应成功解析出 2 张高质量卡片');
+assert(parsedCards[0].category === 'learnings');
+assert(parsedCards[0].topic_fingerprint === 'docker-alpine-glibc');
+assert(parsedCards[0].session_id === 'ses-llm-1');
+assert(parsedCards[1].category === 'decisions');
+console.log('   - 成功解析卡片分类:', parsedCards.map(c => c.category));
+console.log('   ✅ parseLLMExtraction 多卡解析断言通过');
+
+// 5. 验证无价值会话回复被严格拦截
+console.log('5. 验证无价值会话直接拦截（无需沉淀回复返回空列表）...');
+assert(KnowledgeExtractor.parseLLMExtraction('无需沉淀，本会话仅为文件查询。').length === 0);
+assert(KnowledgeExtractor.parseLLMExtraction('无高价值暗知识，代码仅做格式化。').length === 0);
+assert(KnowledgeExtractor.parseLLMExtraction('').length === 0);
+console.log('   ✅ 无价值内容过滤断言通过');
 
 console.log('🎉 Pipeline 知识提炼领域层单元测试 100% 通过！\n');

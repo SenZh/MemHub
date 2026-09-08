@@ -45,6 +45,7 @@ const now = Date.now();
 const tenMinsAgo = now - 10 * 60 * 1000;    // 10分钟前 (热会话)
 const fortyMinsAgo = now - 45 * 60 * 1000;  // 45分钟前 (冷会话)
 const threeHoursAgo = now - 180 * 60 * 1000;// 3小时前 (陈旧会话)
+const tenDaysAgo = now - 10 * 24 * 60 * 60 * 1000; // 10天前 (超出7天窗口)
 
 // 插入测试数据
 const insertStmt = testDb.prepare(`
@@ -58,6 +59,8 @@ insertStmt.run('ses-self-loop', '[MemHub] 自动萃取生成的会话', 'D:/work
 insertStmt.run('ses-self-loop-old', '[MemoryHub] 历史萃取会话', 'D:/workspace/proj-a', null, threeHoursAgo, threeHoursAgo, '{}');
 insertStmt.run('ses-child', '派生子任务会话', 'D:/workspace/proj-a', 'ses-cold', threeHoursAgo, threeHoursAgo, '{}');
 insertStmt.run('ses-excluded-path', '正常冷会话但目录被排除', 'D:/workspace/tmp/scratchpad', null, threeHoursAgo, threeHoursAgo, '{}');
+// 10 天前更新的会话：静默期满足，但若启用 windowDays=7 上界则不应被召回
+insertStmt.run('ses-stale-10d', '10天前更新的陈旧会话', 'D:/workspace/proj-a', null, tenDaysAgo, tenDaysAgo, '{}');
 
 const testAdapter = new OpenCodeAdapter(testDbPath);
 assert(testAdapter.isAvailable() === true);
@@ -95,6 +98,31 @@ const scannedExclude = testAdapter.scanCandidateSessions({
 const excludeIds = scannedExclude.map(s => s.id);
 assert(!excludeIds.includes('ses-excluded-path'), 'exclude 路径规则未能拦截目标目录！');
 console.log('   ✅ scanRules 路径排除过滤真实通过！');
+
+// 真实测试 C：验证 daemon 的 windowDays 窗口上界（只扫最近 N 天更新的会话）
+console.log('   - 验证 windowDays: 7 上界过滤 (仅 daemon 传入) ...');
+const scannedWindow = testAdapter.scanCandidateSessions({
+  idleMinutes: 30,
+  windowDays: 7,
+  limit: 10
+});
+const windowIds = scannedWindow.map(s => s.id);
+console.log('     加 windowDays 后的候选:', windowIds);
+assert(!windowIds.includes('ses-stale-10d'), '10天前的陈旧会话未被 7 天窗口拦截！');
+assert(windowIds.includes('ses-cold'), '7 天内且静默完成的会话应被召回！');
+assert(!windowIds.includes('ses-hot'), '热会话(未到静默期)仍应被拦截！');
+console.log('   ✅ windowDays 上界过滤真实通过！');
+
+// 真实测试 D：不传 windowDays（手动 scan 场景）应召回 10 天前会话（force 全扫语义仍存在）
+console.log('   - 验证不传 windowDays 时手动 scan 不受 7 天窗口约束 ...');
+const scannedNoWindow = testAdapter.scanCandidateSessions({
+  idleMinutes: 30,
+  force: true,
+  limit: 10
+});
+const noWindowIds = scannedNoWindow.map(s => s.id);
+assert(noWindowIds.includes('ses-stale-10d'), '手动 force 全扫应能召回 10 天前会话！');
+console.log('   ✅ 手动 scan 不被 7 天窗口约束真实通过！');
 
 // 清理测试临时夹具
 testAdapter.close();

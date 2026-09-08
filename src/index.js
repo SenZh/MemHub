@@ -45,8 +45,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
         category: {
           type: 'string',
-          enum: ['learnings', 'decisions', 'patterns'],
-          description: '【必须】三大分类之一: learnings(排错避坑因果链), decisions(架构决策ADR/红线), patterns(最佳实践/可复用代码配置模板)'
+          enum: ['learnings', 'decisions', 'patterns', 'business'],
+          description: '【必须】四大分类之一: learnings(排错避坑因果链), decisions(架构决策ADR/红线), patterns(最佳实践/可复用代码配置模板), business(业务领域知识与隐性潜规则)'
         },
         tags: {
           type: 'array',

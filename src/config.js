@@ -32,11 +32,11 @@ export const DB_PATH = path.join(MEMHUB_HOME, 'memory.db');
 export const VAULT_DIR = path.join(MEMHUB_HOME, 'vault');
 export const BACKUP_DIR = path.join(MEMHUB_HOME, 'backups');
 
-export const DEFAULT_CATEGORIES = ['learnings', 'decisions', 'patterns'];
+export const DEFAULT_CATEGORIES = ['learnings', 'decisions', 'patterns', 'business'];
 
 /**
  * 分类别名归一化映射
- * 保证历史别名与近义词（如 solutions -> patterns, pitfall -> learnings）平滑归一
+ * 保证历史别名与近义词（如 solutions -> patterns, pitfall -> learnings, rules -> business）平滑归一
  * 非法分类统一收敛为默认顶级分类 'learnings'
  */
 export function normalizeCategory(rawCategory) {
@@ -49,8 +49,15 @@ export function normalizeCategory(rawCategory) {
   if (lower === 'gotchas' || lower === 'gotcha' || lower === 'pitfall' || lower === 'pitfalls' || lower === 'troubleshoot' || lower === 'learnings' || lower === 'learning') {
     return 'learnings';
   }
-  if (lower === 'decisions' || lower === 'decision' || lower === 'adr' || lower === 'rule' || lower === 'rules') {
+  if (lower === 'decisions' || lower === 'decision' || lower === 'adr') {
     return 'decisions';
+  }
+  if (
+    lower === 'business' || lower === 'biz' || lower === 'business_rule' || lower === 'business_rules' ||
+    lower === 'business-rule' || lower === 'business-rules' || lower === 'domain' || lower === 'rule' ||
+    lower === 'rules' || lower === '业务' || lower === '业务知识' || lower === '业务规则'
+  ) {
+    return 'business';
   }
   
   // 严格安全收敛：未识别的非法枚举统一兜底为 learnings，杜绝脏数据入库
@@ -68,7 +75,17 @@ export function getConfig(projectPath = process.cwd()) {
       include: [],
       exclude: []
     },
-    categories: [...DEFAULT_CATEGORIES]
+    categories: [...DEFAULT_CATEGORIES],
+    // 后台定时守护 daemon 配置块（memhub daemon 使用）
+    daemon: {
+      intervalMinutes: 30,
+      windowDays: 7,
+      idleMinutes: 120,
+      autoExtract: false,
+      silentWindow: { start: 0, end: 0 },
+      cooldownMinutes: 10,
+      opencodeUrl: null
+    }
   };
 
   // 1. 读取全局配置
@@ -107,6 +124,18 @@ export function getConfig(projectPath = process.cwd()) {
     config.idleMinutes = 120;
   }
 
+  // 3.5 daemon 相关环境变量覆盖（优先级高于配置文件，低于显式入参）
+  const envNum = (v) => { const n = parseInt(v, 10); return !isNaN(n) && n > 0 ? n : null; };
+  if (process.env.MEMHUB_DAEMON_INTERVAL) { const n = envNum(process.env.MEMHUB_DAEMON_INTERVAL); if (n) config.daemon.intervalMinutes = n; }
+  if (process.env.MEMHUB_DAEMON_WINDOW_DAYS) { const n = envNum(process.env.MEMHUB_DAEMON_WINDOW_DAYS); if (n) config.daemon.windowDays = n; }
+  if (process.env.MEMHUB_DAEMON_IDLE_MINUTES) { const n = envNum(process.env.MEMHUB_DAEMON_IDLE_MINUTES); if (n) config.daemon.idleMinutes = n; }
+  if (process.env.MEMHUB_DAEMON_AUTO_EXTRACT) {
+    config.daemon.autoExtract = process.env.MEMHUB_DAEMON_AUTO_EXTRACT === '1' || process.env.MEMHUB_DAEMON_AUTO_EXTRACT === 'true';
+  }
+  if (process.env.MEMHUB_OPENCODE_URL && String(process.env.MEMHUB_OPENCODE_URL).length) {
+    config.daemon.opencodeUrl = String(process.env.MEMHUB_OPENCODE_URL);
+  }
+
   return config;
 }
 
@@ -129,6 +158,32 @@ function _mergeConfig(target, source) {
   if (Array.isArray(source.categories)) {
     const set = new Set([...target.categories, ...source.categories]);
     target.categories = Array.from(set);
+  }
+  // daemon 后台定时守护配置块
+  if (source.daemon && typeof source.daemon === 'object') {
+    const d = target.daemon;
+    if (typeof source.daemon.intervalMinutes === 'number' && source.daemon.intervalMinutes > 0) {
+      d.intervalMinutes = source.daemon.intervalMinutes;
+    }
+    if (typeof source.daemon.windowDays === 'number' && source.daemon.windowDays > 0) {
+      d.windowDays = source.daemon.windowDays;
+    }
+    if (typeof source.daemon.idleMinutes === 'number' && source.daemon.idleMinutes > 0) {
+      d.idleMinutes = source.daemon.idleMinutes;
+    }
+    if (typeof source.daemon.autoExtract === 'boolean') {
+      d.autoExtract = source.daemon.autoExtract;
+    }
+    if (typeof source.daemon.cooldownMinutes === 'number' && source.daemon.cooldownMinutes > 0) {
+      d.cooldownMinutes = source.daemon.cooldownMinutes;
+    }
+    if (typeof source.daemon.opencodeUrl === 'string' && source.daemon.opencodeUrl) {
+      d.opencodeUrl = source.daemon.opencodeUrl;
+    }
+    if (source.daemon.silentWindow && typeof source.daemon.silentWindow === 'object') {
+      if (typeof source.daemon.silentWindow.start === 'number') d.silentWindow.start = source.daemon.silentWindow.start;
+      if (typeof source.daemon.silentWindow.end === 'number') d.silentWindow.end = source.daemon.silentWindow.end;
+    }
   }
 }
 

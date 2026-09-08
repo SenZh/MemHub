@@ -330,6 +330,7 @@ CREATE TABLE IF NOT EXISTS knowledge_items (
     summary TEXT NOT NULL,            -- 100字以内现象与根因极简摘要
     tags TEXT NOT NULL,               -- JSON 数组: ["docker", "alpine", "glibc"]
     related_files TEXT,               -- JSON 数组: ["Dockerfile", "package.json"]
+    topic_fingerprint TEXT,           -- 同 session+分类+主题的覆盖定位键：title/tags 归一化实体哈希前缀
     
     -- 【L2/L3：第二步按需展开详情层数据，大文本】
     root_cause TEXT,                  -- 深入技术根因深度剖析
@@ -355,16 +356,26 @@ CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
     tokenize='trigram'
 );
 
--- 3. 离线会话扫描状态机（防止死循环与重复扫描）
+-- 3. 离线会话扫描状态机（防止死循环与重复扫描；schema 由 storage 单一权威维护）
 CREATE TABLE IF NOT EXISTS session_tracking (
     session_id TEXT PRIMARY KEY,
-    source TEXT NOT NULL,             -- 'opencode' | 'cursor'
-    project TEXT NOT NULL,
-    status TEXT NOT NULL,             -- 'EXTRACTED' | 'SKIPPED_NO_VALUE' | 'FAILED'
-    extracted_kb_ids TEXT,            -- 提取出的卡片 ID 列表 (JSON)
-    time_processed INTEGER NOT NULL
+    source TEXT NOT NULL DEFAULT 'opencode', -- 'opencode' | 'cursor'
+    source_agent TEXT,
+    project TEXT NOT NULL DEFAULT '',
+    project_path TEXT,
+    session_title TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING',  -- 'EXTRACTED' | 'SKIPPED' | 'FAILED' | 'EXTRACTING' | 'PENDING'
+    extracted_kb_ids TEXT,                   -- 提取出的卡片 ID 列表 (JSON)
+    card_id TEXT,                            -- 单卡或多卡 ID 数组(JSON)
+    attempts INTEGER DEFAULT 0,
+    locked_until INTEGER DEFAULT 0,
+    last_error TEXT,
+    time_processed INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0
 );
 ```
+> ⚠️ 同一表曾因两处 `CREATE TABLE IF NOT EXISTS` 以不同列定义而冲突（scanner 报 `no column named source_agent`）。
+> 现已收敛：**权威 schema 仅由 `src/storage.js` 维护**，scanner-service 复用；老库靠 `runMigrations` 幂等 `ADD COLUMN` 补齐。
 
 ---
 

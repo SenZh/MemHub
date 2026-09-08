@@ -182,3 +182,109 @@ assert(!recentTagMiss.some(r => r.id === patternRes.id), '未完全匹配标签�
 console.log('测试 6 通过！\n');
 
 console.log('🎉 全部核心存储、分层检索与归档备份单元测试 100% 通过！');
+
+console.log('\n--- 开始测试 7: recordKnowledge mode:upsert 原地覆盖 + 同 session 多分类/多主题 ---');
+const upsertSession = 'ses_upsert_test_' + Date.now().toString(36);
+const upsertProject = 'upsert-test-proj-' + Date.now().toString(36);
+
+// 7.1 upsert 首次插入（未命中定位键）→ 正常新增
+const u1 = recordKnowledge({
+  mode: 'upsert',
+  session_id: upsertSession,
+  project: upsertProject,
+  title: '[Docker/Redis] 启动报 key missing 密码校验 -> 追加 requirepass 正解',
+  category: 'learnings',
+  tags: ['docker', 'redis', 'requirepass'],
+  context: '容器启动报错排查',
+  solution: '追加 --requirepass xxx 并校验 AUTH'
+});
+assert(u1.success === true, 'upsert 首次应成功插入');
+assert(u1.updated === undefined, '首次插入不应带 updated 标记');
+const firstId = u1.id;
+
+// 7.2 同 session+category+同主题再 upsert → 命中同 id 原地更新覆盖（updated:true，不新增）
+const u2 = recordKnowledge({
+  mode: 'upsert',
+  session_id: upsertSession,
+  project: upsertProject,
+  title: '[Docker/Redis] 启动报 key missing 密码校验 -> 追加 requirepass 正解',
+  category: 'learnings',
+  tags: ['docker', 'redis', 'requirepass', 'acl'],
+  context: '容器启动报错排查（补充 ACL 用户授权）',
+  solution: '追加 --requirepass，并同步配置 ACL 用户与授权权限'
+});
+assert(u2.success === true, '二次 upsert 应成功');
+assert(u2.updated === true, `同主题二次 upsert 应更新覆盖，实际 updated=${u2.updated}`);
+assert(u2.id === firstId, `应命中同一卡片 id，期望 ${firstId} 实际 ${u2.id}`);
+
+// 验证内容确实被覆盖为最新 solution
+const u2Card = getKnowledge(firstId);
+assert(u2Card.solution_core && u2Card.solution_core.includes('ACL'), '更新后内容应包含最新 solution 片段');
+assert(u2Card.code_payload && u2Card.code_payload.includes('ACL 用户'), '更新后 code_payload 应被覆盖为最新');
+console.log(`   ✅ 同主题二次 upsert 原地覆盖成功: ${firstId}`);
+
+// 7.3 同 session + 同 category + 不同主题（不同 title/tags → 不同指纹）→ 各落一张互不踩
+const u3 = recordKnowledge({
+  mode: 'upsert',
+  session_id: upsertSession,
+  project: upsertProject,
+  title: '[Docker/Nginx] 反向代理 502 网关超时 -> 调大 proxy_read_timeout 正解',
+  category: 'learnings',
+  tags: ['docker', 'nginx', '502', 'timeout'],
+  context: 'Nginx 反代上游超时排查',
+  solution: '调大 proxy_read_timeout 并关闭缓冲'
+});
+assert(u3.success === true && u3.updated === undefined, '不同主题 upsert 应为新增');
+assert(u3.id !== firstId, '不同主题不应覆盖前一张卡');
+
+// 7.4 同 session 不同 category（决策类）→ 独立成卡，不与 learnings 互踩
+const u4 = recordKnowledge({
+  mode: 'upsert',
+  session_id: upsertSession,
+  project: upsertProject,
+  title: '[Docker/Compose] 决定将 Redis 迁移到独立 Compose 服务的架构取舍',
+  category: 'decisions',
+  tags: ['docker', 'compose', 'redis', 'architecture'],
+  context: '单体 compose 改多服务隔离的决策',
+  root_cause: '单 compose 服务边界不清，重启相互影响',
+  solution: '拆独立 redis service，健康检查先行'
+});
+assert(u4.success === true, '同 session 决策类 upsert 应成功');
+assert(u4.updated === undefined && u4.id !== firstId, '不同 category 应独立成卡');
+
+const sessionCards = searchKnowledge('', { project: upsertProject });
+assert(sessionCards.filter(r => r.project === upsertProject).length >= 3, '同 session 应能产生多张不同类型/主题卡片');
+
+console.log('测试 7 通过！\n');
+
+console.log('🎉 upsert 覆盖 + 同 session 多卡全部断言通过！');
+
+// --- 测试 8: business 业务知识与隐性规则专属要素验证 ---
+console.log('\n--- 开始测试 8: business 业务知识与隐性规则专属要素验证 ---');
+const bizCard = recordKnowledge({
+  title: '[账户中心/充赠] 充值赠送阶梯金额账本与真实本金提现分离规则',
+  category: 'business',
+  project: 'pay-system',
+  tags: ['wallet', 'recharge', 'bonus', 'accounting'],
+  context: '在设计会员充值阶梯营销活动时，针对本金与赠送金的提现/退款规则',
+  solution: '双账本隔离记账：主余额(Real Balance)与赠送余额(Bonus Balance)分开，退款按原始充赠比等比扣回',
+  mechanism: '用户充值 -> 生成本金交易单 -> 触发赠送规则 -> 异步记入赠送账本',
+  guardrails: [
+    '严禁在同一单表单字段混存本金与赠送金',
+    '退款时必须优先扣除剩余赠送金，赠送金不足时扣除实际等价本金'
+  ]
+});
+
+assert(bizCard.success === true, 'business 分类写入应成功');
+assert.strictEqual(bizCard.category, 'business');
+
+const bizDetail = getKnowledge(bizCard.id);
+assert(bizDetail !== null, '必须能够成功查询 business 详情');
+assert(bizDetail.content.includes('## 🎯 业务领域与背景 (Domain Context)'), 'Markdown 应包含业务领域背景');
+assert(bizDetail.content.includes('## 📜 核心业务规则与口径 (Business Rules & Logic)'), 'Markdown 应包含核心业务规则');
+assert(bizDetail.content.includes('## 🔄 状态流转与边界时序 (Lifecycle & State Machine)'), 'Markdown 应包含状态流转时序');
+assert(bizDetail.content.includes('## ⛔ 业务防踩坑与资损红线 (Risk Guardrails)'), 'Markdown 应包含资损红线');
+assert(bizDetail.content.includes('严禁在同一单表单字段混存本金与赠送金'), '红线内容应正确渲染');
+console.log('   ✅ business 专属要素结构化渲染断言全部通过');
+console.log('测试 8 通过！\n');
+
