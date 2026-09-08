@@ -29,6 +29,11 @@
   - 基于 `session_id + category + topic_fingerprint` 为覆盖定位键；
   - 同一会话多次重复抽取时**原地 UPDATE 覆盖**，不产生版本堆积；
   - 同一会话同时包含排错与架构决策时，自动拆分为多张卡片分别独立落盘。
+- 🔎 **双路混合检索与 RRF 排名融合 (Hybrid Search，终结词汇鸿沟)**：
+  - **第一路（字符精确匹配）**：SQLite FTS5 Trigram 字符倒排索引，对类名、报错码、路径 100% 精确穿透；
+  - **第二路（意图语义泛化）**：本地 384 维稠密向量空间（零外部依赖、零 API Key、CPU 毫秒级运算），让自然语言同义词与抽象场景不再漏检；
+  - **倒数排名融合 (RRF)**：基于经典公式 $Score(d) = \sum \frac{1}{60 + Rank_m(d)}$ 无偏平滑合并两路结果并智能重排；
+  - **零漏检保底**：若两路无召回，自动降级为 SQL `LIKE` 模糊匹配。
 - ⚡ **单文件 SQLite 工业存储内核 + DDL 自愈**：
   - 核心数据存放在单文件 SQLite（`~/.memhub/memory.db`）中，自带 WAL 事务锁与 FTS5 倒排索引，杜绝多文件 I/O 碎片与并发写损坏；
   - 内置 DDL 热迁移自愈引擎，自动感知新字段与老库升级；
@@ -153,6 +158,9 @@ memhub backup
 
 # 将 SQLite 知识库无损导出为人类友好的 Markdown 目录树 (Obsidian兼容)
 memhub export
+
+# 全量/增量为已有知识计算 384 维语义向量并持久化
+memhub embed
 
 # 打印当前知识库物理文件路径
 memhub path

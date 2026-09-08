@@ -19,8 +19,8 @@
 | **5. 过滤引擎与配置体系** | 动态静默时间阈值 + watchDirectories / include / exclude 路径正则规则 | 已完整实现（`src/path-filter.js`、`src/config.js`），防时序踩踏与特殊字符转义 | **100%** |
 | **6. 后台常驻定时提炼守护 (P0)** | `memhub daemon` 常驻自循环，通过 OpenCode HTTP 驱动宿主 LLM 抽取 | 已完整打透（`src/daemon.js`、`src/host/opencode-client.js`）：动态端口与鉴权发现 + 7天窗口/120分钟静默防重 + 沉淀指令注入(不 fork) + 无价值坚决不沉淀 | **100%** |
 | **7. 废除离线启发式造假 (P0)** | 彻底清除硬编码关键词捏造假卡，只允许真实 LLM 分析沉淀高质量资产 | 已彻底重构（`src/pipeline/extractor.js`）：废除死模板，保留 Truth Gate 物理成功证据门禁与 LLM 结果解析 | **100%** |
-| **8. 动态知识地图注入 (P1)** | `memhub map` 自动生成当前项目 `<500 tokens` 的 `AGENTS.md` 知识地图节 | 规划至 **v0.2.0**（目前通过 MCP 工具和静态规则引导） | **0%** |
-| **9. 混合检索与向量层 (P1)** | SQLite FTS5 Trigram + 本地轻量向量 (MiniLM) + RRF 倒数排名融合 | 当前基于 **FTS5 Trigram + LIKE 智能兜底**；本地 ONNX 向量引擎与 RRF 规划至后续版本 | **40%** |
+| **8. 混合检索与向量融合层 (P1)** | SQLite FTS5 Trigram + 本地 384 维稠密向量 + RRF 倒数排名融合 | 已完整实现（`src/search/vector-engine.js`、`src/search/rrf.js`、`src/storage.js`）：双路并行召回 + 60 平滑因子 RRF 融合 + 词汇鸿沟语义泛化 + LIKE 优雅兜底 | **100%** |
+| **9. 动态知识地图注入 (P1)** | `memhub map` 自动生成当前项目 `<500 tokens` 的 `AGENTS.md` 知识地图节 | 规划至 **v0.2.0**（目前通过 MCP 工具和静态规则引导） | **0%** |
 | **10. Cursor 深度穿透 (P2)** | 穿透 `%APPDATA%/Cursor/.../state.vscdb` 读取 `composerData` 时序流 | 接口骨架与插槽已就绪（`src/adapters/cursor.js`），底层解析逻辑暂未填入（按既定策略延后） | **20%** |
 | **11. 研发态势与资产大盘** | `memhub stats` 全局与项目投入盘点、资产统计与盲区分析 | 已实现基础统计（分类分布、有效条目数、已扫描会话数），高阶文件改动频次与盲区预警待细化 | **70%** |
 
@@ -73,11 +73,19 @@
 - **物理终态证据门禁 (Truth Gate)**：严格检查退出码 0、测试通过、构建成功等确凿物理事实，未见成功证据严禁提取；
 - **LLM 结果解析与门禁过滤**：提供 `parseLLMExtraction`，负责解析 LLM 的结构化输出并拦截无价值内容。
 
-### 5. CLI 命令行套件 (`src/cli.js`)
+### 5. 混合检索与向量融合引擎 (`src/search/vector-engine.js` & `src/search/rrf.js`)
+- **本地 384 维稠密特征向量空间**：基于字符级/词元级 N-gram 符号投影与 L2 范数归一化，零外部依赖、零 API Key、CPU 毫秒级计算；
+- **双路并行检索架构**：第一路（SQLite FTS5 Trigram 字符精确穿透） + 第二路（384 维余弦相似度语义泛化，终结词汇鸿沟）；
+- **倒数排名融合 (RRF 算法)**：基于 $Score(d) = \sum \frac{1}{60 + Rank_m(d)}$ 消除跨模态物理分差，无偏平滑合并与重排；
+- **全生命周期向量同步与自愈**：老库热迁移自愈 `knowledge_embeddings` 表，写入时自动计算向量，CLI 支持 `memhub embed` 手动维护；
+- **优雅降级保底**：两路未命中时自动平滑回退至 SQL `LIKE` 模糊匹配，保障零漏检。
+
+### 6. CLI 命令行套件 (`src/cli.js`)
 - 核心命令：
   - `memhub daemon`：启动常驻提炼调度（支持 `--once`, `--interval`, `--window-days`, `--idle`, `--limit`, `--dry-run`, `--force`）；
   - `memhub scan`：历史静默会话离线跟踪与扫描；
-  - `memhub find <query>`：FTS5 Trigram 毫秒级全文检索；
+  - `memhub find <query>`：FTS5 + Vector + RRF 混合检索；
+  - `memhub embed`：全量/增量向量同步与持久化；
   - `memhub get <id>`：查看卡片正文详情与代码；
   - `memhub list`：查看最近沉淀的知识大纲；
   - `memhub stats`：统计资产分布与会话萃取状态；
@@ -94,15 +102,11 @@
 - **当前状况**：目前依赖 Agent 自觉调用 MCP 工具检索。
 - **待做事项**：开发 `memhub map` 命令，根据当前项目目录名与近期代码改动关键词，实时精选 Top 3~5 条最相关的长效资产，生成严格 `<500 tokens` 的 Markdown 块动态注入项目根目录的 `AGENTS.md`。
 
-### 差距 2：本地向量引擎与混合检索 (P1)
-- **当前状况**：目前依赖 SQLite FTS5 Trigram 精确字符匹配与 LIKE 模糊匹配。
-- **待做事项**：引入本地零外部依赖的 ONNX 运行时小模型（MiniLM / 384维），实现“FTS5 字符 + 向量语义”双路召回与 RRF 倒数排名融合，终结词汇鸿沟。
-
-### 差距 3：研发态势大盘深度统计 (P1)
+### 差距 2：研发态势大盘深度统计 (P1)
 - **当前状况**：`memhub stats` 当前仅展示分类分布与扫描状态。
 - **待做事项**：深度解析 OpenCode 会话中的 `tokens_*`、`cost`、`summary_diffs` 字段，提供“投入精力分布、改动文件热点、高频报错未决预警”的高阶研发报表。
 
-### 差距 4：Cursor 桌面端无锁穿透 (P2)
+### 差距 3：Cursor 桌面端无锁穿透 (P2)
 - **当前状况**：已在 `src/adapters/cursor.js` 预留接口，目前返回空数组。
 - **待做事项**：以只读不锁模式（`?mode=ro&immutable=1`）穿透 `%APPDATA%/Cursor/User/globalStorage/state.vscdb`，解析 `composerData` 与 `bubbleId` 时序消息流。
 

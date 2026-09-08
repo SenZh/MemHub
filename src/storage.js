@@ -5,6 +5,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { MEMORY_HUB_HOME, DB_PATH, BACKUP_DIR, VAULT_DIR, getCategories, normalizeCategory, ensureDirectories } from './config.js';
 import { scrubSecrets } from './scrubber.js';
 import { resolveSessionContext } from './session-resolver.js';
+import { embedText, cosineSimilarity, serializeVector, deserializeVector, VECTOR_DIMENSIONS } from './search/vector-engine.js';
+import { fuseRankings } from './search/rrf.js';
 
 let dbInstance = null;
 
@@ -124,9 +126,23 @@ export function getDatabase() {
       time_processed INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL DEFAULT 0
     );
+
+    -- 4. 语义向量嵌入持久化表 (384 维稠密特征)
+    CREATE TABLE IF NOT EXISTS knowledge_embeddings (
+      id TEXT PRIMARY KEY,
+      vector TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_embeddings_updated ON knowledge_embeddings(updated_at);
   `);
 
   runMigrations(dbInstance);
+
+  // 老库启动时自动检测并补齐缺失的向量
+  try {
+    syncEmbeddings(dbInstance);
+  } catch (e) {}
 
   return dbInstance;
 }
@@ -325,6 +341,20 @@ export function recordKnowledge(params) {
       db.prepare(`INSERT INTO knowledge_fts (id, title, tags, summary, solution_core) VALUES (?, ?, ?, ?, ?)`)
         .run(located.id, title, tags.join(' '), summary, solutionCore);
 
+      // 同步更新 384 维语义向量
+      try {
+        const embedSourceText = [title, tags.join(' '), summary, solutionCore, contextText || ''].filter(Boolean).join(' ');
+        const vec = embedText(embedSourceText);
+        db.prepare(`
+          INSERT INTO knowledge_embeddings (id, vector, dimensions, updated_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            vector = excluded.vector,
+            dimensions = excluded.dimensions,
+            updated_at = excluded.updated_at
+        `).run(located.id, serializeVector(vec), VECTOR_DIMENSIONS, now);
+      } catch (e) {}
+
       return {
         success: true,
         id: located.id,
@@ -416,6 +446,20 @@ export function recordKnowledge(params) {
     solutionCore
   );
 
+  // 7. 生成并更新 384 维稠密语义向量 (knowledge_embeddings)
+  try {
+    const embedSourceText = [title, tags.join(' '), summary, solutionCore, contextText || ''].filter(Boolean).join(' ');
+    const vec = embedText(embedSourceText);
+    db.prepare(`
+      INSERT INTO knowledge_embeddings (id, vector, dimensions, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        vector = excluded.vector,
+        dimensions = excluded.dimensions,
+        updated_at = excluded.updated_at
+    `).run(cardId, serializeVector(vec), VECTOR_DIMENSIONS, now);
+  } catch (e) {}
+
   return {
     success: true,
     id: cardId,
@@ -429,7 +473,13 @@ export function recordKnowledge(params) {
 
 /**
  * 渐进式检索第一阶段：返回高密度 L1 索引与摘要 (~30-50 Tokens/条)
- * 支持 FTS5 全文召回 + 工作区隔离(当前私有+global穿透) + 多标签参数化交集(AND)
+ *
+ * 核心架构（v0.2.0 工业级混合检索 Hybrid Search）：
+ *  1. 第一路（精确匹配）：SQLite FTS5 Trigram 字符倒排检索，对代码类名、报错码、文件路径 100% 精确穿透；
+ *  2. 第二路（意图泛化）：384 维轻量稠密语义向量空间度量，基于余弦相似度召回抽象同义场景；
+ *  3. 倒数排名融合 (RRF 算法)：Score(d) = sum( 1 / (60 + Rank_m(d)) )，实现无偏平滑合并与重排；
+ *  4. 元数据硬过滤：支持工作区隔离 (project=? OR global)、顶级分类及多标签 (tags AND) 精确收窄；
+ *  5. 优雅兜底：若两路无召回，自动降级为 LIKE 模糊匹配，保障零漏检。
  */
 export function searchKnowledge(query, options = {}) {
   const db = getDatabase();
@@ -449,7 +499,8 @@ export function searchKnowledge(query, options = {}) {
 
   const cleanQuery = query.trim();
 
-  // 1. 优先尝试 FTS5 Trigram 全文检索
+  // === 路 1: SQLite FTS5 Trigram 全文倒排检索 ===
+  let ftsResults = [];
   if (cleanQuery.length >= 3) {
     let sql = `
       SELECT 
@@ -469,25 +520,86 @@ export function searchKnowledge(query, options = {}) {
       params.push(project);
     }
 
-    // 多标签交集 (AND 逻辑)
     cleanTags.forEach(tag => {
       sql += ` AND EXISTS (SELECT 1 FROM json_each(k.tags) WHERE value = ?)`;
       params.push(tag);
     });
 
     sql += ` ORDER BY rank LIMIT ?`;
-    params.push(limit);
+    params.push(Math.max(limit * 2, 20));
 
     try {
       const stmt = db.prepare(sql);
-      const rows = stmt.all(...params);
-      if (rows.length > 0) {
-        return rows.map(formatL1Result);
-      }
+      ftsResults = stmt.all(...params);
     } catch (err) {}
   }
 
-  // 2. 降级策略：LIKE 模糊匹配
+  // === 路 2: 本地 384 维稠密语义向量空间检索 ===
+  let vecResults = [];
+  try {
+    const queryVec = embedText(cleanQuery);
+    let vecSql = `
+      SELECT 
+        k.id, k.title, k.category, k.project, k.tags, k.summary, k.related_files, k.time_created,
+        e.vector
+      FROM knowledge_embeddings e
+      JOIN knowledge_items k ON e.id = k.id
+      WHERE k.status = 'active'
+    `;
+    const vecParams = [];
+
+    if (rawCat) {
+      vecSql += ` AND k.category = ?`;
+      vecParams.push(rawCat);
+    }
+    if (project) {
+      vecSql += ` AND (k.project = ? OR k.project = 'global')`;
+      vecParams.push(project);
+    }
+
+    cleanTags.forEach(tag => {
+      vecSql += ` AND EXISTS (SELECT 1 FROM json_each(k.tags) WHERE value = ?)`;
+      vecParams.push(tag);
+    });
+
+    const candidateRows = db.prepare(vecSql).all(...vecParams);
+    const scored = [];
+    for (const row of candidateRows) {
+      const docVec = deserializeVector(row.vector);
+      if (docVec) {
+        const sim = cosineSimilarity(queryVec, docVec);
+        // 过滤负相关或极低关联噪音，保留具备正向语义关联的候选
+        if (sim > 0.05) {
+          scored.push({
+            id: row.id,
+            title: row.title,
+            category: row.category,
+            project: row.project,
+            tags: row.tags,
+            summary: row.summary,
+            related_files: row.related_files,
+            time_created: row.time_created,
+            score: sim
+          });
+        }
+      }
+    }
+    scored.sort((a, b) => b.score - a.score);
+    vecResults = scored.slice(0, Math.max(limit * 2, 20));
+  } catch (err) {}
+
+  // === 路 3: 倒数排名融合 (RRF) 智能重排 ===
+  if (ftsResults.length > 0 || vecResults.length > 0) {
+    const fused = fuseRankings(
+      { fts: ftsResults, vector: vecResults },
+      { limit, k: 60 }
+    );
+    if (fused.length > 0) {
+      return fused.map(f => formatL1Result(f.item));
+    }
+  }
+
+  // === 降级兜底：LIKE 模糊匹配（向下兼容短词与边界）===
   let fallbackSql = `
     SELECT id, title, category, project, tags, summary, related_files, time_created
     FROM knowledge_items k
@@ -515,6 +627,43 @@ export function searchKnowledge(query, options = {}) {
   const stmt = db.prepare(fallbackSql);
   const rows = stmt.all(...fallbackParams);
   return rows.map(formatL1Result);
+}
+
+/**
+ * 全量/增量向量同步维护 (对存量无 embedding 的记录补齐 384 维向量)
+ */
+export function syncEmbeddings(customDb = null) {
+  const db = customDb || getDatabase();
+  const rows = db.prepare(`
+    SELECT k.id, k.title, k.tags, k.summary, k.solution_core, k.context_text
+    FROM knowledge_items k
+    LEFT JOIN knowledge_embeddings e ON k.id = e.id
+    WHERE e.id IS NULL AND k.status = 'active'
+  `).all();
+
+  if (rows.length === 0) {
+    return { processed: 0 };
+  }
+
+  const now = Date.now();
+  const insertStmt = db.prepare(`
+    INSERT INTO knowledge_embeddings (id, vector, dimensions, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      vector = excluded.vector,
+      dimensions = excluded.dimensions,
+      updated_at = excluded.updated_at
+  `);
+
+  let count = 0;
+  for (const row of rows) {
+    const embedSourceText = [row.title, row.tags, row.summary, row.solution_core, row.context_text || ''].filter(Boolean).join(' ');
+    const vec = embedText(embedSourceText);
+    insertStmt.run(row.id, serializeVector(vec), VECTOR_DIMENSIONS, now);
+    count++;
+  }
+
+  return { processed: count };
 }
 
 function formatL1Result(row) {

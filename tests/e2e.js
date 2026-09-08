@@ -22,6 +22,7 @@ const suites = [
   { name: 'Layer 1: PathFilter 路径规则与 Glob 过滤引擎', cmd: 'node tests/test-path-filter.js' },
   { name: 'Layer 1: Config 动态配置加载与防腐', cmd: 'node tests/test-config.js' },
   { name: 'Layer 1: 基础设施与单文件 SQLite 分层存储内核', cmd: 'node tests/test-storage.js' },
+  { name: 'Layer 1.5: 混合检索与向量融合引擎 (FTS5 + Vector + RRF)', cmd: 'node tests/test-hybrid-search.js' },
   { name: 'Layer 2: 宿主适配器层 (AgentAdapter + 动态时间过滤 + 防自循环)', cmd: 'node tests/test-adapters.js' },
   { name: 'Layer 3: 提炼与调度管道层 (Extractor 领域提炼 + Scanner 状态机)', cmd: 'node tests/test-extractor.js' },
   { name: 'Layer 4: 接口协议与呈现层 (Stdio JSON-RPC MCP 渐进式披露协议)', cmd: 'node tests/test-mcp-protocol.js' },

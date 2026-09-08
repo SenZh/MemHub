@@ -7,7 +7,8 @@ import {
   getDatabase, 
   backupDatabase, 
   exportToMarkdown, 
-  getStats 
+  getStats,
+  syncEmbeddings
 } from './storage.js';
 import { runOfflineScan } from './scanner.js';
 import { 
@@ -36,6 +37,7 @@ MemHub (memhub / mem-hub) CLI - AI 编程知识中枢与工程长效记忆
   memhub stats                 查看全局或项目维度的研发态势与知识资产统计
   memhub backup [路径]         执行 SQLite 原生 VACUUM INTO 无损原子热备份
   memhub export [目录]         将 SQLite 数据库无损导出为结构化 Markdown 目录树 (Obsidian兼容)
+  memhub embed                 全量/增量为已有知识计算 384 维语义向量并持久化
   memhub path                  打印知识库物理路径与数据库位置
 
 daemon 守护指令:
@@ -231,6 +233,17 @@ switch (command) {
       console.log(`✅ 导出成功！共导出 ${res.totalExported} 篇 Markdown 卡片至:\n   ${res.exportDir}`);
     } catch (e) {
       console.error(`❌ 导出失败: ${e.message}`);
+    }
+    break;
+  }
+
+  case 'embed': {
+    console.log(`🔄 正在执行知识向量化与同步维护 (384 维语义空间)...`);
+    try {
+      const res = syncEmbeddings();
+      console.log(`✅ 向量化同步完成！新计算并持久化了 ${res.processed} 条卡片向量。`);
+    } catch (e) {
+      console.error(`❌ 向量同步失败: ${e.message}`);
     }
     break;
   }
