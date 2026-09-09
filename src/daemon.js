@@ -4,11 +4,12 @@ import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { getConfig, MEMHUB_HOME, ensureDirectories } from './config.js';
 import { getDatabase } from './storage.js';
-import {
-  discoverOpenCodeServer,
-  listCandidateSessions,
-  dispatchExtractionPrompt
+import { 
+  discoverOpenCodeServer, 
+  listCandidateSessions, 
+  dispatchExtractionPrompt 
 } from './host/opencode-client.js';
+import { runDreamPipeline } from './dream/pipeline.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -326,6 +327,23 @@ export function runDaemonForeground(cliOptions = {}) {
       }
 
       console.log(`✨ 本轮会话处理完毕。`);
+
+      // 4. 夜间做梦自省检查 (若处于凌晨时段 02:00~05:00 或启用了 dream)
+      if (config.dream?.enabled) {
+        const currentHour = new Date().getHours();
+        // 如果是凌晨时段 (2点到5点) 自动触发做梦熔炼
+        if (currentHour >= 2 && currentHour <= 5) {
+          console.log(`\n🌙 [memhub daemon] 检测到当前处于夜间深度睡眠窗口 (${currentHour}:00)，启动做梦自省引擎...`);
+          try {
+            const dreamRes = await runDreamPipeline({ dryRun: false });
+            if (dreamRes.processed > 0) {
+              console.log(`   ✅ 昨夜做梦成功派发 ${dreamRes.processed} 个碎片簇进行高阶熔炼`);
+            }
+          } catch (de) {
+            console.warn(`   ⚠️ 做梦流水线异常: ${de.message}`);
+          }
+        }
+      }
     } catch (err) {
       console.error(`[memhub daemon] 本轮调度异常: ${err.message}`);
     } finally {

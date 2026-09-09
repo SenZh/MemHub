@@ -21,6 +21,7 @@
 - 🧠 **借宿主算力提炼（零 API Key 依赖）**：利用原会话自身上下文与模型参数执行知识抽取，吃 Prompt Cache 近乎零额外费用。
 - 🕒 **后台常驻记忆提炼守护 (`memhub daemon`)**：
   - 常驻进程 `setInterval` 自循环，支持优雅退出信号（SIGINT/SIGTERM）；
+  - **统一会话筛选与 Subagent 拦截**：统一基于 `isSubagentSession` 排除所有 `parentID` 存在、子智能体角色（`review`/`explore` 等）与派生子会话，仅聚焦主任务，直接节省 60% 无效推理算力；
   - **宿主 HTTP 驱动（不 fork，原地复盘）**：动态扫描端口与鉴权，直连运行中的 OpenCode HTTP 服务向目标会话注入深度复盘指令；
   - **双重时间窗口与防重**：只扫描最近 7 天内更新（`windowDays: 7`）且距现在超过 120 分钟静默稳定（`idleMinutes: 120`）的冷态会话，本地 SQLite `session_tracking` 表权威防重；
   - **无价值坚决不沉淀**：严格门禁，日常闲聊、简单查文件或未验证成果直接回复“无需沉淀”，禁止写入数据库；
@@ -44,6 +45,11 @@
 - 🎯 **工作区隔离与多标签交集检索**：
   - 支持 `(project = ? OR project = 'global')` 物理隔离无关项目，同时穿透全局通用经验；
   - 基于 SQLite 原生 `json_each` 实现标签多值交集（AND）参数化精准收窄。
+- 🌙 **AI 做梦与记忆熔炼自省引擎 (`memhub dream`)**：
+  - **离线睡眠反思**：每天凌晨定时或通过极简 Cron 自动触发，将 SQLite 中零散的单点排错/决策卡进行跨会话交叉比对；
+  - **三维亲和度聚类**：融合 Tag Jaccard + File Overlap + 384 维向量余弦相似度，利用连通子图精准切分出 2~5 张卡片的高凝聚力做梦主题簇；
+  - **架构师级提炼 Prompt**：指导宿主 LLM 抽象出通用因果律、识别设计冲突（Contradiction Radar），升华出工业级 L4 认知设计规约；
+  - **状态机闭环与溯源防重**：落盘 L4 规约卡（`is_synthesized = 1`），原碎片卡自动原子标记为 `status = 'consolidated'` 封存归档，永久退出做梦候选池，杜绝套娃；同时写入 `knowledge_dream_history` 审计表，30 天内相同卡片组合绝对幂等拦截。
 - 🤖 **极简动宾 MCP 协议与大模型认知读门禁**：
   - 核心工具升级为 `memhub_save`（存）、`memhub_search`（搜）、`memhub_get`（取）、`memhub_recent`（历）；
   - **破解“何时读、怎么读、能做什么”**：强化 Tool Description 显式注入 4 大调用时机（遇报错异常、动核心架构、定业务潜规则、方案选型），检索返回自带动态行动分支指引；
@@ -157,6 +163,9 @@ memhub stats
 # 查看 MCP 工具调用审计流水与检索追踪（支持 --tool <name>, --project <name>, --json）
 memhub audit 20
 
+# 执行离线做梦记忆熔炼与碎片聚类（支持 --dry-run, --affinity <0.0~1.0>, --project <name>）
+memhub dream --dry-run
+
 # 离线扫描已结束（超过静默时间）的历史会话状态
 memhub scan
 
@@ -199,6 +208,12 @@ MemHub 遵循“渐进式披露 (Progressive Disclosure)”与“自解释认知
     "windowDays": 7,
     "idleMinutes": 120
   },
+  "dream": {
+    "enabled": true,
+    "cron": "0 3 * * *",
+    "minAffinity": 0.55,
+    "maxClusterSize": 5
+  },
   "scanRules": {
     "watchDirectories": [
       "D:/workspace"
@@ -217,6 +232,7 @@ MemHub 遵循“渐进式披露 (Progressive Disclosure)”与“自解释认知
 ```
 
 - **`daemon`**：常驻定时提炼参数块，支持环境变量覆盖（`MEMHUB_DAEMON_INTERVAL`, `MEMHUB_DAEMON_WINDOW_DAYS`, `MEMHUB_DAEMON_IDLE_MINUTES`, `MEMHUB_OPENCODE_URL`）；
+- **`dream`**：夜间做梦自省参数块，支持极简 Cron 定时（默认每天凌晨 3 点）、亲和度初筛阈值与单簇卡片上限，支持环境变量覆盖（`MEMHUB_DREAM_ENABLED`, `MEMHUB_DREAM_CRON`, `MEMHUB_DREAM_AFFINITY`）；
 - **`idleMinutes`**：判定会话进入已结束完成态的静默分钟数（默认 120，支持环境变量 `MEMHUB_IDLE_MINUTES` 覆盖）；
 - **`watchDirectories`**：限制扫描的物理根目录数组（默认空表示全库扫描）；
 - **`exclude`**：黑名单通配符规则，**最高优先级**，命中立即跳过；
@@ -226,11 +242,11 @@ MemHub 遵循“渐进式披露 (Progressive Disclosure)”与“自解释认知
 
 ## 🧪 测试与质量保障
 
-MemHub 拥有完整的分层自动化测试矩阵（涵盖 CLI 契约、路径过滤引擎、动态配置防腐、分层存储内核、混合向量 RRF 检索、适配器动态过滤、管道提炼、Stdio MCP 渐进披露、宿主客户端探测、按 Project 态势大盘与 MCP 调用审计）：
+MemHub 拥有完整的分层自动化测试矩阵（涵盖 CLI 契约、路径过滤引擎、动态配置防腐、分层存储内核、混合向量 RRF 检索、适配器动态过滤、管道提炼、Stdio MCP 渐进披露、宿主客户端探测、按 Project 态势大盘、MCP 调用审计、做梦亲和度聚类及做梦调度管道）：
 
 ```bash
 npm test
-# 10 大测试套件 100% 自动化全绿灯通过
+# 12 大测试套件 100% 自动化全绿灯通过
 ```
 
 ---

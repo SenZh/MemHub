@@ -27,7 +27,9 @@ const suites = [
   { name: 'Layer 3: 提炼与调度管道层 (Extractor 领域提炼 + Scanner 状态机)', cmd: 'node tests/test-extractor.js' },
   { name: 'Layer 4: 接口协议与呈现层 (Stdio JSON-RPC MCP 渐进式披露协议)', cmd: 'node tests/test-mcp-protocol.js' },
   { name: '宿主驱动客户端与多策略动态端口探测', cmd: 'node tests/test-host-client.js' },
-  { name: '研发态势大盘与代码热点度量 (memhub stats)', cmd: 'node tests/test-stats.js' }
+  { name: '研发态势大盘与代码热点度量 (memhub stats)', cmd: 'node tests/test-stats.js' },
+  { name: 'AI 做梦引擎碎片聚类与防重 (memhub dream)', cmd: 'node tests/test-dream-cluster.js' },
+  { name: 'AI 做梦执行调度管道与状态机流转 (Dream Pipeline)', cmd: 'node tests/test-dream-pipeline.js' }
 ];
 
 try {
@@ -58,7 +60,7 @@ try {
   }
 
   console.log('====================================================');
-  console.log('🎉 10 大测试套件全部 100% 成功通过！');
+  console.log('🎉 12 大测试套件全部 100% 成功通过！');
   console.log('====================================================');
 } finally {
   // 清理临时测试沙箱

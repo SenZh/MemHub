@@ -65,6 +65,33 @@ export function normalizeCategory(rawCategory) {
 }
 
 /**
+ * 项目名称防腐与归一化映射 (Normalize Project Name)
+ * 解决大模型大小写突变、连字符混乱、或别名造成的项目命名裂变
+ */
+export function normalizeProjectName(rawProject) {
+  if (!rawProject || typeof rawProject !== 'string') return 'global';
+  const trimmed = rawProject.trim();
+  const lower = trimmed.toLowerCase();
+
+  // 1. 特殊业务工程别名权威收敛
+  if (lower === 'omsdubhe' || lower === 'oms-dubhe' || lower === 'dubhe-oms' || lower === 'dubheoms') {
+    return 'oms';
+  }
+  if (lower === 'productservice' || lower === 'product-service' || lower === 'product_service') {
+    return 'ProductService';
+  }
+  if (lower === 'memhub' || lower === 'mem-hub' || lower === 'memory-hub' || lower === 'exobrain') {
+    return 'MemHub';
+  }
+  if (lower === 'global' || lower === 'all' || lower === 'common') {
+    return 'global';
+  }
+
+  // 默认保留原字符串两端去空
+  return trimmed;
+}
+
+/**
  * 读取完整的 MemHub 配置 (合并全局与项目级配置，并解析环境变量)
  */
 export function getConfig(projectPath = process.cwd()) {
@@ -85,6 +112,14 @@ export function getConfig(projectPath = process.cwd()) {
       silentWindow: { start: 0, end: 0 },
       cooldownMinutes: 10,
       opencodeUrl: null
+    },
+    // AI 做梦自省与认知熔炼 dream 配置块（极简 Cron 定时驱动）
+    dream: {
+      enabled: true,
+      cron: '0 3 * * *',          // 定时触发表达式 (默认每天凌晨 3:00 执行)
+      intervalMinutes: 1440,      // 简易间隔兜底 (默认 24 小时)
+      minAffinity: 0.55,          // 连通聚类亲和度阈值 (0.0~1.0)
+      maxClusterSize: 5           // 单个主题簇最大卡片数量
     }
   };
 
@@ -136,6 +171,22 @@ export function getConfig(projectPath = process.cwd()) {
     config.daemon.opencodeUrl = String(process.env.MEMHUB_OPENCODE_URL);
   }
 
+  // 3.6 dream 做梦配置环境变量覆盖
+  if (process.env.MEMHUB_DREAM_ENABLED !== undefined) {
+    config.dream.enabled = process.env.MEMHUB_DREAM_ENABLED === '1' || process.env.MEMHUB_DREAM_ENABLED === 'true';
+  }
+  if (process.env.MEMHUB_DREAM_CRON) {
+    config.dream.cron = String(process.env.MEMHUB_DREAM_CRON);
+  }
+  if (process.env.MEMHUB_DREAM_AFFINITY) {
+    const af = parseFloat(process.env.MEMHUB_DREAM_AFFINITY);
+    if (!isNaN(af) && af >= 0 && af <= 1) config.dream.minAffinity = af;
+  }
+  if (process.env.MEMHUB_DREAM_INTERVAL) {
+    const n = envNum(process.env.MEMHUB_DREAM_INTERVAL);
+    if (n) config.dream.intervalMinutes = n;
+  }
+
   return config;
 }
 
@@ -184,6 +235,15 @@ function _mergeConfig(target, source) {
       if (typeof source.daemon.silentWindow.start === 'number') d.silentWindow.start = source.daemon.silentWindow.start;
       if (typeof source.daemon.silentWindow.end === 'number') d.silentWindow.end = source.daemon.silentWindow.end;
     }
+  }
+  // dream 做梦配置块
+  if (source.dream && typeof source.dream === 'object') {
+    const dr = target.dream;
+    if (typeof source.dream.enabled === 'boolean') dr.enabled = source.dream.enabled;
+    if (typeof source.dream.cron === 'string' && source.dream.cron.trim()) dr.cron = source.dream.cron.trim();
+    if (typeof source.dream.intervalMinutes === 'number' && source.dream.intervalMinutes > 0) dr.intervalMinutes = source.dream.intervalMinutes;
+    if (typeof source.dream.minAffinity === 'number' && source.dream.minAffinity >= 0 && source.dream.minAffinity <= 1) dr.minAffinity = source.dream.minAffinity;
+    if (typeof source.dream.maxClusterSize === 'number' && source.dream.maxClusterSize > 0) dr.maxClusterSize = source.dream.maxClusterSize;
   }
 }
 

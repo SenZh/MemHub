@@ -236,6 +236,42 @@ export function getSessionUpdatedTime(s) {
 }
 
 /**
+ * 统一 Subagent 判定门禁：识别并排除所有子任务与委派智能体
+ * 判定依据：
+ * 1. 结构标记：parentID / parent_id 存在即代表子会话；
+ * 2. 角色特征：agent 属于 review / explore / general / image-reader 等辅助子代理；
+ * 3. 标题特征：包含 subagent、sub-agent 或 @review 等标记。
+ */
+export function isSubagentSession(session) {
+  if (!session || typeof session !== 'object') return false;
+
+  // 1. 父会话 ID 检查 (同时兼容 HTTP API 的 parentID 与 SQLite 的 parent_id)
+  if (session.parentID || session.parent_id || session.parentId) {
+    return true;
+  }
+
+  // 2. 专用子智能体角色检查 (排除非主任务 agent)
+  const agent = String(session.agent || '').toLowerCase().trim();
+  if (agent && agent !== 'build' && agent !== 'main' && agent !== 'default') {
+    return true;
+  }
+
+  // 3. 标题特征模式检查
+  const title = String(session.title || '').toLowerCase();
+  if (
+    title.includes('subagent') ||
+    title.includes('sub-agent') ||
+    title.includes('(@review') ||
+    title.includes('(@explore') ||
+    title.includes('(@general')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * 从 OpenCode 宿主筛选符合定时抽取条件的候选历史会话。
  *
  * 过滤门禁（严格遵守系统规约）：
@@ -243,6 +279,7 @@ export function getSessionUpdatedTime(s) {
  *  2. 静默过滤：更新时间距现在超过 idleMinutes 分钟（默认 120 分钟），说明已结束交互进入冷态；
  *  3. 防重过滤：session_id 不在 excludeIds（已处理/已跳过）集合中；
  *  4. 运行态过滤：排除当前正在 running 的会话，避免打扰；
+ *  5. Subagent 门禁：排除所有 parentID 存在、子智能体角色或带 subagent 标题的派生会话。
  *
  * @param {string} baseUrl
  * @param {Object} opts { windowDays, idleMinutes, excludeIds, limit }
@@ -281,6 +318,9 @@ export async function listCandidateSessions(baseUrl, opts = {}) {
     if (!s || !s.id) continue;
     if (excludeIds.has(s.id)) continue;
     if (s.status === 'running') continue;
+
+    // 核心门禁：坚决排除 Subagent 派生会话 (parentID / 子智能体 / 标题标记)
+    if (isSubagentSession(s)) continue;
 
     // 路径 include / exclude 规则过滤
     const targetDir = s.directory || s.path || '';
@@ -334,6 +374,9 @@ export async function pickIdleSession(baseUrl, opts = {}) {
  */
 export function buildExtractionPrompt(opts = {}) {
   const sessionId = opts.targetSessionId || '当前会话';
+  const projectConstraint = opts.projectName 
+    ? `\n   - 【严格所属项目约束】：调用 memhub_save 时，project 字段必须严格填 "${opts.projectName}"，严禁擅自修改或添加前后缀！`
+    : '';
   return [
     `【MemHub 自动化工程记忆提炼任务】`,
     `请全面复盘本会话发生的真实代码修改、排错过程或架构权衡决策，提炼出可供团队跨会话长期复用的工程暗知识资产。`,
@@ -353,7 +396,7 @@ export function buildExtractionPrompt(opts = {}) {
     `     * business: 业务领域暗知识与隐性潜规则（必须包含 context[业务域]、solution[业务口径与计算规则]、guardrails[业务资损与防踩坑红线]、mechanism[状态机流转时序]）`,
     `   - title 格式严格遵守：[技术栈/模块] 核心场景/症状 -> 最终结论/正解 (25-45字，必须含具体实体名，如: [Docker/Alpine] glibc缺失致canvas崩溃 -> 改用debian-slim或加libc6-compat)。`,
     `5. 【防重与覆盖机制】：`,
-    `   - 调用 memhub_save 时，务必传入 session_id="${sessionId}"。`,
+    `   - 调用 memhub_save 时，务必传入 session_id="${sessionId}"。${projectConstraint}`,
     `   - 若可能，传入简明小写的 topic_fingerprint（如 "docker-alpine-glibc"），系统将自动执行原地更新覆盖，防止重复落库。`
   ].join('\n');
 }
@@ -368,7 +411,10 @@ export async function dispatchExtractionPrompt(baseUrl, opts = {}) {
   const sessionId = opts.sessionId;
   if (!sessionId) throw new Error('dispatchExtractionPrompt: 缺少必须的 sessionId');
   const dryRun = opts.dryRun === true;
-  const prompt = buildExtractionPrompt({ targetSessionId: sessionId });
+  const prompt = buildExtractionPrompt({ 
+    targetSessionId: sessionId,
+    projectName: opts.projectName
+  });
 
   const payload = {
     dryRun,

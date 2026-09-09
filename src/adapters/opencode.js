@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { AgentAdapter } from './base.js';
 import { PathFilter } from '../path-filter.js';
 import { getConfig } from '../config.js';
+import { isSubagentSession } from '../host/opencode-client.js';
 
 export class OpenCodeAdapter extends AgentAdapter {
   constructor(customDbPath = null) {
@@ -91,6 +92,9 @@ export class OpenCodeAdapter extends AgentAdapter {
     const results = [];
     for (const c of candidates) {
       if (excludeIds.has(c.id)) continue;
+
+      // 统一门禁：排除任何可能的 Subagent
+      if (isSubagentSession(c)) continue;
 
       // 路径规则与白名单/黑名单过滤
       if (!filter.isMatch(c.directory)) {

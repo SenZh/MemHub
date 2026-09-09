@@ -179,4 +179,32 @@ try {
   await stopMockServer();
 }
 
-console.log('\n🎉 OpenCode 宿主驱动客户端 8 项断言全部通过！');
+console.log('9. listCandidateSessions 排除 Subagent 子任务与委派会话测试...');
+const p5 = await startMockServer();
+try {
+  const baseUrl = `http://127.0.0.1:${p5}`;
+  const now = Date.now();
+  mockSessionsData = [
+    // 正常主会话 (合格)
+    { id: 'ses-main-1', title: '实现用户中心多租户架构改造', time: { updated: now - 3 * 3600000 } },
+    // 带有 parentID 的子任务 (应排除)
+    { id: 'ses-sub-parentid', parentID: 'ses-main-1', title: '审查用例', time: { updated: now - 3 * 3600000 } },
+    // agent 为 review 子角色 (应排除)
+    { id: 'ses-sub-agent', agent: 'review', title: '深度代码审查', time: { updated: now - 3 * 3600000 } },
+    // 标题含有 (@review subagent) 特征 (应排除)
+    { id: 'ses-sub-title', title: '提取代码逻辑 (@review subagent)', time: { updated: now - 3 * 3600000 } }
+  ];
+
+  const mainCandidates = await listCandidateSessions(baseUrl, {
+    windowDays: 7,
+    idleMinutes: 120
+  });
+
+  assert.equal(mainCandidates.length, 1, `应只保留 1 个主会话，实际保留了 ${mainCandidates.length} 个`);
+  assert.equal(mainCandidates[0].id, 'ses-main-1');
+  console.log('   ✅ parentID、子智能体角色与 subagent 标题全部被精准拦截，仅放行主会话！');
+} finally {
+  await stopMockServer();
+}
+
+console.log('\n🎉 OpenCode 宿主驱动客户端 9 项断言全部通过！');

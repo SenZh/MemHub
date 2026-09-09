@@ -1,6 +1,6 @@
 {
   "name": "memhub",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "The unified knowledge & memory hub for AI coding agents",
   "bin": {
@@ -19,6 +19,8 @@
     "test:mcp": "node tests/test-mcp-protocol.js",
     "test:path-filter": "node tests/test-path-filter.js",
     "test:stats": "node tests/test-stats.js",
+    "test:dream": "node tests/test-dream-cluster.js",
+    "test:dream:pipeline": "node tests/test-dream-pipeline.js",
     "test:cli": "node tests/test-cli.js"
   },
   "dependencies": {

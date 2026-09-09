@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { MEMORY_HUB_HOME, DB_PATH, BACKUP_DIR, VAULT_DIR, getCategories, normalizeCategory, ensureDirectories } from './config.js';
+import { MEMORY_HUB_HOME, DB_PATH, BACKUP_DIR, VAULT_DIR, getCategories, normalizeCategory, normalizeProjectName, ensureDirectories } from './config.js';
 import { scrubSecrets } from './scrubber.js';
 import { resolveSessionContext } from './session-resolver.js';
 import { embedText, cosineSimilarity, serializeVector, deserializeVector, VECTOR_DIMENSIONS } from './search/vector-engine.js';
@@ -28,12 +28,40 @@ function runMigrations(db) {
     if (!colSet.has('topic_fingerprint')) {
       db.exec("ALTER TABLE knowledge_items ADD COLUMN topic_fingerprint TEXT;");
     }
+    if (!colSet.has('is_synthesized')) {
+      db.exec("ALTER TABLE knowledge_items ADD COLUMN is_synthesized INTEGER DEFAULT 0;");
+    }
+    if (!colSet.has('consolidated_into')) {
+      db.exec("ALTER TABLE knowledge_items ADD COLUMN consolidated_into TEXT;");
+    }
+    if (!colSet.has('dream_attempts')) {
+      db.exec("ALTER TABLE knowledge_items ADD COLUMN dream_attempts INTEGER DEFAULT 0;");
+    }
+    if (!colSet.has('dream_skip_until')) {
+      db.exec("ALTER TABLE knowledge_items ADD COLUMN dream_skip_until INTEGER DEFAULT 0;");
+    }
 
     // 幂等刷写存量历史分类 solutions -> patterns
     db.exec("UPDATE knowledge_items SET category = 'patterns' WHERE category = 'solutions';");
   } catch (e) {
     // 忽略迁移过程中非致命错误
   }
+
+  // 做梦引擎审计与幂等防重表创建
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS knowledge_dream_history (
+        id TEXT PRIMARY KEY,
+        cluster_fingerprint TEXT UNIQUE NOT NULL,
+        source_ids TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        synthesized_id TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_dream_fp ON knowledge_dream_history(cluster_fingerprint);
+      CREATE INDEX IF NOT EXISTS idx_dream_created ON knowledge_dream_history(created_at);
+    `);
+  } catch (e) {}
 
   // session_tracking 老库补列（统一为 scanner-service 与多卡所需的完整 schema）
   try {
@@ -94,6 +122,10 @@ export function getDatabase() {
       status TEXT DEFAULT 'active',
       superseded_by TEXT,
       supersedes TEXT,
+      is_synthesized INTEGER DEFAULT 0,
+      consolidated_into TEXT,
+      dream_attempts INTEGER DEFAULT 0,
+      dream_skip_until INTEGER DEFAULT 0,
       access_count INTEGER DEFAULT 0,
       time_created INTEGER NOT NULL,
       time_updated INTEGER NOT NULL
@@ -300,9 +332,10 @@ export function recordKnowledge(params) {
   if (params.verification) extraPayloadObj.verification = scrubSecrets(params.verification);
   const extraPayloadStr = JSON.stringify(extraPayloadObj);
 
-  // 2. 上下文推导 (优先使用显式指定的 project)
+  // 2. 上下文推导 (优先使用显式指定的 project，并经过 normalizeProjectName 防腐归一)
   const context = resolveSessionContext(params.session_id, params.project_path);
-  const projectName = params.project ? scrubSecrets(params.project.trim()) : context.projectName;
+  const rawProject = params.project ? scrubSecrets(params.project.trim()) : context.projectName;
+  const projectName = normalizeProjectName(rawProject);
   const now = Date.now();
 
   // 2.5 计算主题指纹（同 session 同分类同主题覆盖定位；不同主题互不误覆盖）

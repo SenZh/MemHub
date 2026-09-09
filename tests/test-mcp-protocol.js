@@ -55,7 +55,7 @@ async function runTest() {
   console.log('初始化响应:', initRes.result?.serverInfo);
   // 严格校验名称为 memhub 与版本
   assert.strictEqual(initRes.result?.serverInfo?.name, 'memhub', 'Server Name 必须精确为 memhub');
-  assert.strictEqual(initRes.result?.serverInfo?.version, '0.1.1', 'Server Version 必须精确为 0.1.1');
+  assert.strictEqual(initRes.result?.serverInfo?.version, '0.1.2', 'Server Version 必须精确为 0.1.2');
 
   console.log('\n--- 2. 发送 tools/list 获取注册工具并扫描工具描述防反弹 ---');
   const listRes = await sendRequest('tools/list');

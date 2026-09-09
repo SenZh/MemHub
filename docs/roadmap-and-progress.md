@@ -1,8 +1,8 @@
 # MemHub 目标差距分析与工程演进计划书 (Roadmap & Progress)
 
-> **版本定位**：v0.1.2 常驻定时守护与宿主驱动提炼交付版（Daemon & Host-Driven Release）  
+> **版本定位**：v0.1.2 记忆提炼、认知读门禁与做梦自省交付版（Consolidation & Dreaming Release）  
 > **项目定位**：面向 AI Coding Agent 的工程长效记忆与暗知识调度中枢（Unified Memory & Knowledge Hub）  
-> **更新基准**：2026-09-08
+> **更新基准**：2026-09-09
 
 ---
 
@@ -17,14 +17,16 @@
 | **3. 四大基石分类与结构要素** | 收敛为四大正交顶级分类（learnings/decisions/patterns/business），各具备专属要素结构 | 已完整实现（`src/config.js`、`src/storage.js`），彻底补全业务背景与排错误区 | **100%** |
 | **4. 存储层 Upsert 原地覆盖与多卡** | 同 session 同主题多次抽取原地 UPDATE 覆盖，不同主题/分类沉淀为多张卡 | 已完整实现（`src/storage.js`），引入 `topic_fingerprint` 列与权威 `session_tracking` | **100%** |
 | **5. 过滤引擎与配置体系** | 动态静默时间阈值 + watchDirectories / include / exclude 路径正则规则 | 已完整实现（`src/path-filter.js`、`src/config.js`），防时序踩踏与特殊字符转义 | **100%** |
-| **6. 后台常驻定时提炼守护 (P0)** | `memhub daemon` 常驻自循环，通过 OpenCode HTTP 驱动宿主 LLM 抽取 | 已完整打透（`src/daemon.js`、`src/host/opencode-client.js`）：动态端口与鉴权发现 + 7天窗口/120分钟静默防重 + 沉淀指令注入(不 fork) + 无价值坚决不沉淀 | **100%** |
+| **6. 后台常驻定时提炼守护 (P0)** | `memhub daemon` 常驻自循环，通过 OpenCode HTTP 驱动宿主 LLM 抽取 | 已完整打透（`src/daemon.js`、`src/host/opencode-client.js`）：动态端口与鉴权 + 7天窗口/120分静默 + 权威排除所有 Subagent 子会话 + 严禁假卡 | **100%** |
 | **7. 废除离线启发式造假 (P0)** | 彻底清除硬编码关键词捏造假卡，只允许真实 LLM 分析沉淀高质量资产 | 已彻底重构（`src/pipeline/extractor.js`）：废除死模板，保留 Truth Gate 物理成功证据门禁与 LLM 结果解析 | **100%** |
 | **8. 混合检索与向量融合层 (P1)** | SQLite FTS5 Trigram + 本地 384 维稠密向量 + RRF 倒数排名融合 | 已完整实现（`src/search/vector-engine.js`、`src/search/rrf.js`、`src/storage.js`）：双路并行召回 + 60 平滑因子 RRF 融合 + 词汇鸿沟语义泛化 + LIKE 优雅兜底 | **100%** |
-| **9. 离线做梦与记忆熔炼 (P1 - 顶层热点)** | 闲时做梦机制（Dreaming）：碎片聚合、矛盾雷达、增量吸收、防重状态机与 L4 升华层 | 顶层架构设计已完成落盘（`docs/dreaming-architecture-design.md`），计划于 **v0.2.0** 核心落地 | **20% (设计已定稿)** |
-| **10. 认知读协议与触发规约增强 (P0)** | 强化 MCP 工具描述与读协议诱导，解决 LLM 不知何时读、怎么读、能做什么 | 技术设计定稿（`docs/read-protocol-and-stats-design.md`），正在落地推进 | **30%** |
+| **9. 离线做梦与记忆熔炼 (P1 - 顶层热点)** | 极简 Cron 触发闲时做梦（Dreaming）：碎片三维聚类、宿主 LLM 反思 Prompt、防重状态机、L4 升华层落盘与碎片封存 | Phase 1 & 2 端到端已完整打通（Prompt 模板、执行流水线、supersedes 溯源链、consolidated 封存流转），单测 100% 覆盖 | **100%** |
+| **10. 认知读协议与触发规约增强 (P0)** | 强化 MCP 工具描述与读协议诱导，解决 LLM 不知何时读、怎么读、能做什么 | 已完整实现（`src/index.js`），注入 4 大触发门禁与动态分支指引，单测验证通过 | **100%** |
 | **11. 研发态势与项目资产大盘 (P1)** | `memhub stats` 全局/项目研发态势与按 Project 维度分类资产大盘总结 | 已完整实现（`src/storage.js`、`src/cli.js`），支持 ASCII 可视化与 `--json` 输出 | **100%** |
-| **12. 动态知识地图注入 (P2)** | `memhub map` 自动生成当前项目 `<500 tokens` 的 `AGENTS.md` 知识地图节 | 评估识别痛点（开局任务未知），调整优先级至 v0.2.x 探索 | **0%** |
-| **13. Cursor 深度穿透 (P2)** | 穿透 `%APPDATA%/Cursor/.../state.vscdb` 读取 `composerData` 时序流 | 接口骨架与插槽已就绪（`src/adapters/cursor.js`），底层解析逻辑暂未填入（按既定策略延后） | **20%** |
+| **12. MCP 工具调用审计日志 (P0)** | 端到端捕获 MCP 工具调用流水、查询关键词、命中条数与耗时，CLI `memhub audit` 检索 | 已完整实现（`mcp_audit_logs` 表、AOP 切面、`memhub audit` 命令），单测全覆盖 | **100%** |
+| **13. 项目命名空间防腐与治理 (P0)** | 根治多系统别名（如 `omsdubhe` / `OMS-Dubhe`）裂变，统一收敛为权威项目名 | 已完整实现（存量数据清洗归一、`normalizeProjectName` 写入防腐、Prompt 强约束注入） | **100%** |
+| **14. 动态知识地图注入 (P2)** | `memhub map` 自动生成当前项目 `<500 tokens` 的 `AGENTS.md` 知识地图节 | 评估识别痛点（开局任务未知），调整优先级至 v0.2.x 探索 | **0%** |
+| **15. Cursor 深度穿透 (P2)** | 穿透 `%APPDATA%/Cursor/.../state.vscdb` 读取 `composerData` 时序流 | 接口骨架与插槽已就绪（`src/adapters/cursor.js`），底层解析逻辑暂未填入（按既定策略延后） | **20%** |
 
 ---
 
@@ -64,6 +66,7 @@
   - 扫描窗口：只处理最近 `windowDays`（默认 7 天）内有更新的会话；
   - 静默时间：只处理更新时间距现在超过 `idleMinutes`（默认 120 分钟）的已稳定冷态会话；
   - 防重机制：查询本地 SQLite `session_tracking` 表，已标记为 `EXTRACTED` 或 `SKIPPED` 的会话不重复触发；
+  - **单一权威 Subagent 拦截门禁**：通过 `isSubagentSession` 全面拦截 `parentID` / `agent` 子角色 / `subagent` 标题派生会话，仅聚焦主任务，直接节省 60% 无效推理算力；
 - **宿主 LLM 借算力驱动（HTTP 驱动，不 fork）**：
   - 调用 OpenCode HTTP API `POST /session/:id/prompt_async` 向目标会话注入深度复盘指令；
   - 宿主 LLM 在会话原有上下文中复盘真实变更，并调用已挂载的 MCP 工具 `memhub_save` 落盘；
@@ -85,12 +88,13 @@
 ### 6. CLI 命令行套件 (`src/cli.js`)
 - 核心命令：
   - `memhub daemon`：启动常驻提炼调度（支持 `--once`, `--interval`, `--window-days`, `--idle`, `--limit`, `--dry-run`, `--force`）；
-  - `memhub scan`：历史静默会话离线跟踪与扫描；
-  - `memhub find <query>`：FTS5 + Vector + RRF 混合检索；
+  - `memhub dream`：离线记忆熔炼与碎片聚类（支持 `--dry-run`, `--affinity`, `--project`, `--json`）；
+  - `memhub search` / `memhub find`：FTS5 + Vector + RRF 混合检索（支持 `--project`, `--category`, `--tag`）；
+  - `memhub list`：查看最近沉淀的知识大纲（支持 `--limit`, `--project`, `--category`, `--tag` 与 search 规范对齐）；
+  - `memhub stats`：统计资产分布、项目维度矩阵分布与会话萃取状态（支持 `--json`, `--project`）；
+  - `memhub audit`：查看 MCP 工具调用与访问审计流水（支持 `--tool <name>`, `--json`, `--limit`）；
   - `memhub embed`：全量/增量向量同步与持久化；
   - `memhub get <id>`：查看卡片正文详情与代码；
-  - `memhub list`：查看最近沉淀的知识大纲；
-  - `memhub stats`：统计资产分布与会话萃取状态；
   - `memhub backup` / `memhub export`：热备份与 Markdown 导出；
   - `memhub path`：查看本地存储路径配置。
 
@@ -100,20 +104,25 @@
 
 对照完整愿景，后续版本需分步推进以下模块：
 
-### 差距 1：离线做梦与记忆熔炼引擎 `memhub dream` (P1 - 顶层重点)
-- **当前状况**：已完成 5W2H 顶层方案、聚类公式、防重指纹表设计及生命周期流转规约（参见 `docs/dreaming-architecture-design.md`）。
-- **待做事项**：
-  1. 存储层 DDL 热自愈扩展：增加 `is_synthesized`、`status`、`consolidated_into` 等字段，新建 `knowledge_dream_history` 审计表；
-  2. 实现基于「Tag + File + 384维向量」三维相似度的无向连通子图聚类算法；
-  3. 打造闲时守护做梦流水线，结合宿主 LLM 完成多碎片升华为 L4 认知规范与矛盾雷达预警。
+### 1. 离线做梦与记忆熔炼引擎 (`src/dream/`)
+- **三维聚类亲和度算法** (`src/dream/clustering.js`)：
+  - 基于 $Score = 0.35 \times Jaccard(Tags) + 0.30 \times Overlap(Files) + 0.35 \times CosineSim(Vectors)$，通过 BFS/DFS 连通子图将 2~5 张高凝聚力碎片切分为独立做梦主题簇；
+- **架构师级做梦反思提示词** (`src/dream/prompt.js`)：
+  - 输入多碎片详细要素，指导宿主 LLM 交叉比对共性技术根因、扫描设计冲突（Contradiction Radar），提炼通用的 L4 规范；
+- **做梦调度与状态机闭环** (`src/dream/pipeline.js`)：
+  - 落盘 L4 卡片（`is_synthesized = 1`，`supersedes = "id1,id2..."` 挂载完整溯源链）；
+  - 将原底层碎片原子更新为 `status = 'consolidated'` 与 `consolidated_into = l4_id`，永久退出后续做梦候选池，杜绝套娃；
+  - 写入 `knowledge_dream_history` 审计表，30 天内相同卡片组合绝对幂等拦截；
+- **夜间极简 Cron 与 CLI** (`src/daemon.js`, `src/cli.js`)：
+  - 支持 `memhub dream`（支持 `--dry-run`, `--affinity`, `--project`），常驻守护在凌晨自动触发做梦自省。
 
-### 差距 2：动态知识地图自动注入 `memhub map` (P1)
+### 差距 2：动态知识地图自动注入 `memhub map` (P2)
 - **当前状况**：目前依赖 Agent 自觉调用 MCP 工具检索。
 - **待做事项**：开发 `memhub map` 命令，根据当前项目目录名与近期代码改动关键词，实时精选 Top 3~5 条最相关的长效资产，生成严格 `<500 tokens` 的 Markdown 块动态注入项目根目录的 `AGENTS.md`。
 
-### 差距 3：研发态势大盘深度统计 (P1)
-- **当前状况**：`memhub stats` 当前仅展示分类分布与扫描状态。
-- **待做事项**：深度解析 OpenCode 会话中的 `tokens_*`、`cost`、`summary_diffs` 字段，提供“投入精力分布、改动文件热点、高频报错未决预警”的高阶研发报表。
+### 差距 3：研发态势大盘深度统计 (P2)
+- **当前状况**：`memhub stats` 当前已支持分类分布、按 Project 维度矩阵分布与 MCP 频次透视。
+- **待做事项**：深度解析 OpenCode 会话中的 `tokens_*`、`cost`、`summary_diffs` 字段，提供“投入精力分布、改动文件热点”的高阶报表。
 
 ### 差距 4：Cursor 桌面端无锁穿透 (P2)
 - **当前状况**：已在 `src/adapters/cursor.js` 预留接口，目前返回空数组。
@@ -125,25 +134,26 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ v0.1.2 当前交付版本 (已达成)                                      │
-│ • 单文件 SQLite 分层存储内核 + DDL 自愈热迁移 + VACUUM 热备        │
-│ • 极简动宾 MCP 协议 (memhub_search/get/save/recent 两阶段渐进披露)│
-│ • 四大顶级基石分类收敛 (learnings/decisions/patterns/business 专属要素) │
-│ • 存储层 Upsert 原地覆盖 + session_id/topic_fingerprint 防重      │
-│ • 后台常驻守护 memhub daemon (setInterval + 优雅退出信号)         │
-│ • OpenCode 宿主 HTTP 驱动抽取 (动态端口与鉴权 + 7天窗口/120分静默) │
-│ • 彻底删除离线启发式硬编码假抽取，确立真实 LLM 提炼主链路         │
-│ • Truth Verification Gate 物理终态成功证据检验门禁               │
+│ v0.1.2 当前交付版本 (已达成全部 12 项能力)                        │
+│ • 单文件 SQLite 分层存储内核 + DDL 自愈热迁移 + VACUUM 原生热备     │
+│ • 极简动宾 MCP 协议 (memhub_search/get/save/recent 两阶段防爆Token)│
+│ • 认知读门禁注入 (4 大必调时机 + 动态 instruction 分支指引)       │
+│ • 端到端 MCP 调用审计流水 (mcp_audit_logs 与 memhub audit)         │
+│ • 项目维度研发态势与资产大盘矩阵 (memhub stats 项目对比)           │
+│ • 项目命名空间防腐治理 (统一 oms 权威收敛与 Prompt 强约束)         │
+│ • 本地 384 维向量 + FTS5 Trigram + RRF 倒数排名混合检索           │
+│ • 后台常驻提炼守护 memhub daemon (OpenCode HTTP 动态端口与鉴权驱动)│
+│ • 离线做梦与记忆熔炼 (Dreaming Phase 1 & 2：三维聚类+L4熔炼+封存) │
 └─────────────────────────────────┬────────────────────────────────┘
                                   │
                                   ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ v0.2.0 离线做梦与认知自省引擎 (下一阶段核心攻坚)                  │
-│ • 落地 memhub dream 做梦引擎 (碎片聚类 + 记忆熔炼 + 矛盾自省)    │
-│ • 引入 L4 认知升华层与增量吸收机制，彻底规避记忆碎片与认知精神分裂│
-│ • 实现 memhub map 动态生成 AGENTS.md 知识地图节 (<500 tokens)   │
-│ • 细化 memhub stats 高阶研发投入与代码热点统计报表               │
-└─────────────────────────────────┬────────────────────────────────┘
+│ v0.2.0 多宿主生态扩展与协同 (下一阶段演进)                        │
+│ • 穿透 Cursor state.vscdb 离线会话提取                           │
+│ • Claude Code hooks (Stop / SessionEnd / PreCompact) 原生探测挂载 │
+│ • 探索开局动态知识地图注入 (memhub map)                          │
+│ • 团队级 Git-Backed Vault 双向同步 (memhub sync)                 │
+└──────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
 ┌──────────────────────────────────────────────────────────────────┐

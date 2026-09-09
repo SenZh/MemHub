@@ -11,6 +11,11 @@ import {
   syncEmbeddings,
   getMcpAuditLogs
 } from './storage.js';
+import { 
+  getDreamCandidateItems, 
+  clusterCandidateItems 
+} from './dream/clustering.js';
+import { runDreamPipeline } from './dream/pipeline.js';
 import { runOfflineScan } from './scanner.js';
 import { 
   runDaemon, 
@@ -32,12 +37,12 @@ MemHub (memhub / mem-hub) CLI - AI 编程知识中枢与工程长效记忆
 用法:
   memhub scan [数量]           离线扫描超过静默时间未活跃的历史 Session 跟踪状态
   memhub daemon [start|stop|status|logs]  后台常驻定时提炼守护服务 (默认后台运行)
-  memhub find <关键词>         全文检索历史避坑经验与架构决策 (支持 FTS5 Trigram 模糊匹配)
+  memhub search / find <词>    全文/混合检索历史避坑经验与决策 (支持 --project, --category, --tag)
   memhub get <id>              查看某张知识卡片的完整详细内容与代码正文
-  memhub list [条数]           查看最近沉淀的高密度知识索引列表
-  memhub stats [选项]          查看全局/项目研发态势、代码踩坑热点与风险预警
-                               (支持 --detailed, --json, --project <name>)
+  memhub list [选项]           查看最近沉淀的知识列表 (支持 --limit, --project, --category, --tag)
+  memhub stats [选项]          查看全局/项目研发态势与项目维度分类大盘 (支持 --json, --project)
   memhub audit [条数]          查看 MCP 工具调用审计流水 (支持 --tool <name>, --json)
+  memhub dream [选项]          执行做梦引擎离线记忆熔炼与碎片聚类 (支持 --dry-run, --project, --affinity)
   memhub backup [路径]         执行 SQLite 原生 VACUUM INTO 无损原子热备份
   memhub export [目录]         将 SQLite 数据库无损导出为结构化 Markdown 目录树 (Obsidian兼容)
   memhub embed                 全量/增量为已有知识计算 384 维语义向量并持久化
@@ -179,12 +184,36 @@ switch (command) {
   }
 
   case 'list': {
-    const limit = parseInt(args[1], 10) || 10;
-    const list = listRecent({ limit });
-    console.log(`\n📚 最近沉淀的知识索引 (共 ${list.length} 条):\n`);
-    list.forEach((item, idx) => {
-      console.log(`${idx + 1}. [${item.id}] [${item.category}] \x1b[36m${item.title}\x1b[0m (项目: ${item.project || 'global'})`);
-    });
+    const rawArgs = args.slice(1);
+    let project = null;
+    let category = null;
+    const tags = [];
+    let limit = 10;
+
+    for (let i = 0; i < rawArgs.length; i++) {
+      const arg = rawArgs[i];
+      if (arg === '--project' || arg === '-w' || arg === '--workspace') {
+        project = rawArgs[++i];
+      } else if (arg === '--category' || arg === '-c') {
+        category = rawArgs[++i];
+      } else if (arg === '--tag' || arg === '-t') {
+        tags.push(rawArgs[++i]);
+      } else if (arg === '--limit' || arg === '-n') {
+        limit = parseInt(rawArgs[++i], 10) || 10;
+      } else if (!isNaN(parseInt(arg, 10)) && !rawArgs[i - 1]?.startsWith('-')) {
+        limit = parseInt(arg, 10);
+      }
+    }
+
+    const list = listRecent({ limit, project, category, tags });
+    console.log(`\n📚 最近沉淀的知识索引 (共 ${list.length} 条 | 项目过滤: ${project || '全部/穿透global'}):\n`);
+    if (list.length === 0) {
+      console.log(`  (未找到匹配条件的知识条目)`);
+    } else {
+      list.forEach((item, idx) => {
+        console.log(`${idx + 1}. [${item.id}] [${item.category.padEnd(9)}] \x1b[36m${item.title}\x1b[0m (项目: ${item.project || 'global'})`);
+      });
+    }
     console.log('');
     break;
   }
@@ -305,6 +334,81 @@ switch (command) {
         const queryStr = (l.query_summary || '-').slice(0, 45);
         console.log(`[${timeStr}] ${statusBadge} ${toolStr} | ${projStr} | 耗时:${durationStr} | 命中:${String(l.hits_count).padStart(2)} | 目标: ${queryStr}`);
       });
+    }
+    console.log(`============================================================\n`);
+    break;
+  }
+
+  case 'dream': {
+    let project = null;
+    let dryRun = false;
+    let jsonMode = false;
+    let limit = 100;
+    let minAffinity = 0.55;
+
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--dry-run') {
+        dryRun = true;
+      } else if (args[i] === '--json') {
+        jsonMode = true;
+      } else if (args[i] === '--project' && args[i + 1]) {
+        project = args[++i];
+      } else if (args[i] === '--limit' && args[i + 1]) {
+        limit = parseInt(args[++i], 10);
+      } else if (args[i] === '--affinity' && args[i + 1]) {
+        minAffinity = parseFloat(args[++i]);
+      } else if (!args[i].startsWith('-') && !project) {
+        project = args[i];
+      }
+    }
+
+    const candidates = getDreamCandidateItems({ project, limit });
+    const clusters = clusterCandidateItems(candidates, { minAffinity });
+
+    if (jsonMode) {
+      console.log(JSON.stringify({
+        total_candidates: candidates.length,
+        total_clusters: clusters.length,
+        clusters
+      }, null, 2));
+      break;
+    }
+
+    console.log(`\n============================================================`);
+    console.log(`          🌙 MemHub AI 做梦自省引擎 (Dreaming Phase 1)         `);
+    console.log(`============================================================`);
+    console.log(`【候选池碎片】: ${candidates.length} 张 active 状态未升华卡片`);
+    console.log(`【聚类亲和度】: >= ${minAffinity} (结合 Tag Jaccard + File Overlap + 384维向量)`);
+    console.log(`【形成主题簇】: ${clusters.length} 个可熔炼簇 (2~5张卡片)`);
+
+    if (clusters.length === 0) {
+      console.log(`\n  ℹ️ 当前知识库碎片相关度较分散，暂未形成满足条件的做梦主题簇。`);
+      console.log(`  建议继续日常编码积累长效资产，或使用 --affinity 0.40 调宽初筛阈值。`);
+    } else {
+      console.log(`\n【📦 候选做梦主题簇预览 (Dream Clusters)】:`);
+      clusters.forEach((cl, idx) => {
+        console.log(`\n  [主题簇 ${idx + 1}] 项目空间: ${cl.project} | 包含 ${cl.items.length} 张碎片`);
+        console.log(`   └─ 指纹: ${cl.fingerprint.slice(0, 16)}...`);
+        cl.items.forEach(it => {
+          console.log(`      • [${it.category.padEnd(9)}] ${it.id} - ${it.title}`);
+        });
+      });
+    }
+
+    if (dryRun) {
+      console.log(`\n  [DRY-RUN 模式] 仅进行拓扑连通聚类与指纹运算，未调用宿主 LLM。`);
+    } else {
+      console.log(`\n🚀 正在启动做梦执行管道，尝试借宿主 LLM 执行深度反思与熔炼...`);
+      try {
+        const pipeRes = await runDreamPipeline({ project, minAffinity, dryRun: false });
+        if (pipeRes.skipped_reason) {
+          console.log(`  ℹ️ ${pipeRes.skipped_reason}`);
+        } else {
+          console.log(`  ✅ 成功派发 ${pipeRes.processed} 个主题簇进行深度熔炼！`);
+        }
+      } catch (e) {
+        console.error(`  ❌ 做梦流水线异常: ${e.message}`);
+      }
     }
     console.log(`============================================================\n`);
     break;
