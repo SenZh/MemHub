@@ -135,6 +135,24 @@ export function getDatabase() {
       updated_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_embeddings_updated ON knowledge_embeddings(updated_at);
+
+    -- 5. MCP 访问与调用审计日志表
+    CREATE TABLE IF NOT EXISTS mcp_audit_logs (
+      id TEXT PRIMARY KEY,
+      tool_name TEXT NOT NULL,
+      project TEXT,
+      session_id TEXT,
+      query_summary TEXT,
+      input_payload TEXT,
+      hits_count INTEGER DEFAULT 0,
+      duration_ms INTEGER DEFAULT 0,
+      status TEXT NOT NULL,
+      error_message TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_mcp_audit_tool ON mcp_audit_logs(tool_name);
+    CREATE INDEX IF NOT EXISTS idx_mcp_audit_created ON mcp_audit_logs(created_at);
+    CREATE INDEX IF NOT EXISTS idx_mcp_audit_project ON mcp_audit_logs(project);
   `);
 
   runMigrations(dbInstance);
@@ -923,7 +941,7 @@ export function exportToMarkdown(exportDir = VAULT_DIR) {
 }
 
 /**
- * 统计全局与项目研发态势与资产 (hub stats)
+ * 统计全局与项目研发态势与资产 (memhub stats 深度大盘)
  */
 export function getStats(options = {}) {
   const db = getDatabase();
@@ -948,7 +966,7 @@ export function getStats(options = {}) {
   }
   const totalCount = db.prepare(totalSql).get(...totalParams)?.total || 0;
 
-  // 3. 已扫描会话数
+  // 3. 已扫描会话数与状态
   let sessSql = `SELECT status, COUNT(*) as count FROM session_tracking`;
   const sessParams = [];
   if (project) {
@@ -958,10 +976,142 @@ export function getStats(options = {}) {
   sessSql += ` GROUP BY status`;
   const sessionStats = db.prepare(sessSql).all(...sessParams);
 
+  // 4. 按 project 分组统计资产大盘与四大分类矩阵
+  let projSql = `
+    SELECT 
+      COALESCE(project, 'default') as project_name,
+      category,
+      COUNT(*) as count
+    FROM knowledge_items
+    WHERE status = 'active'
+  `;
+  const projParams = [];
+  if (project) {
+    projSql += ` AND project = ?`;
+    projParams.push(project);
+  }
+  projSql += ` GROUP BY project_name, category ORDER BY project_name ASC`;
+  const projRows = db.prepare(projSql).all(...projParams);
+
+  // 整理为项目维度的聚合报表
+  const projectMap = new Map();
+  for (const row of projRows) {
+    const pName = row.project_name;
+    if (!projectMap.has(pName)) {
+      projectMap.set(pName, {
+        project: pName,
+        total: 0,
+        learnings: 0,
+        decisions: 0,
+        patterns: 0,
+        business: 0
+      });
+    }
+    const pStat = projectMap.get(pName);
+    pStat.total += row.count;
+    if (row.category === 'learnings') pStat.learnings += row.count;
+    else if (row.category === 'decisions') pStat.decisions += row.count;
+    else if (row.category === 'patterns') pStat.patterns += row.count;
+    else if (row.category === 'business') pStat.business += row.count;
+  }
+  const projectsSummary = Array.from(projectMap.values())
+    .sort((a, b) => b.total - a.total);
+
+  // 5. 估算节省 Token (按每篇被复用的资产平均规避 3 轮会话试错，每轮 ~2000 tokens 估算)
+  const estimatedSavedTokens = totalCount * 4500;
+
+  // 6. MCP 工具调用审计汇总
+  let mcpStats = [];
+  try {
+    mcpStats = db.prepare(`
+      SELECT tool_name, COUNT(*) as count, AVG(duration_ms) as avg_duration_ms
+      FROM mcp_audit_logs
+      GROUP BY tool_name
+      ORDER BY count DESC
+    `).all();
+  } catch {}
+
   return {
     project: project || 'all_projects',
     total_knowledge_entries: totalCount,
     categories: categoryStats,
-    sessions_scanned: sessionStats
+    sessions_scanned: sessionStats,
+    projects: projectsSummary,
+    mcp_tool_calls: mcpStats,
+    estimated_saved_tokens: estimatedSavedTokens
   };
+}
+
+/**
+ * 记录 MCP 工具调用审计日志
+ */
+export function logMcpAccess(logEntry = {}) {
+  try {
+    const db = getDatabase();
+    const id = 'log-' + crypto.randomBytes(6).toString('hex');
+    const toolName = logEntry.tool_name || 'unknown';
+    const project = logEntry.project || null;
+    const sessionId = logEntry.session_id || null;
+    const querySummary = logEntry.query_summary ? String(logEntry.query_summary).slice(0, 300) : null;
+    let inputPayload = null;
+    if (logEntry.input_payload) {
+      try {
+        inputPayload = typeof logEntry.input_payload === 'string' 
+          ? logEntry.input_payload 
+          : JSON.stringify(logEntry.input_payload);
+        // 截断超大 payload 防撑爆日志
+        if (inputPayload.length > 2000) {
+          inputPayload = inputPayload.slice(0, 2000) + '...[TRUNCATED]';
+        }
+      } catch {}
+    }
+    const hitsCount = Number(logEntry.hits_count) || 0;
+    const durationMs = Number(logEntry.duration_ms) || 0;
+    const status = logEntry.status || 'SUCCESS';
+    const errorMessage = logEntry.error_message ? String(logEntry.error_message).slice(0, 500) : null;
+    const createdAt = Date.now();
+
+    db.prepare(`
+      INSERT INTO mcp_audit_logs (
+        id, tool_name, project, session_id, query_summary, 
+        input_payload, hits_count, duration_ms, status, error_message, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, toolName, project, sessionId, querySummary,
+      inputPayload, hitsCount, durationMs, status, errorMessage, createdAt
+    );
+
+    return { success: true, id };
+  } catch (e) {
+    // 审计日志写入失败不阻断核心业务，输出 stderr
+    console.error(`[MemHub] 审计日志记录警告: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * 查询最近 MCP 访问调用日志
+ */
+export function getMcpAuditLogs(options = {}) {
+  const db = getDatabase();
+  const limit = Math.min(Math.max(Number(options.limit) || 20, 1), 200);
+  const toolName = options.tool || null;
+  const project = options.project || null;
+
+  let sql = `SELECT * FROM mcp_audit_logs WHERE 1=1`;
+  const params = [];
+
+  if (toolName) {
+    sql += ` AND tool_name = ?`;
+    params.push(toolName);
+  }
+  if (project) {
+    sql += ` AND project = ?`;
+    params.push(project);
+  }
+
+  sql += ` ORDER BY created_at DESC LIMIT ?`;
+  params.push(limit);
+
+  return db.prepare(sql).all(...params);
 }

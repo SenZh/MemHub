@@ -20,9 +20,11 @@
 | **6. 后台常驻定时提炼守护 (P0)** | `memhub daemon` 常驻自循环，通过 OpenCode HTTP 驱动宿主 LLM 抽取 | 已完整打透（`src/daemon.js`、`src/host/opencode-client.js`）：动态端口与鉴权发现 + 7天窗口/120分钟静默防重 + 沉淀指令注入(不 fork) + 无价值坚决不沉淀 | **100%** |
 | **7. 废除离线启发式造假 (P0)** | 彻底清除硬编码关键词捏造假卡，只允许真实 LLM 分析沉淀高质量资产 | 已彻底重构（`src/pipeline/extractor.js`）：废除死模板，保留 Truth Gate 物理成功证据门禁与 LLM 结果解析 | **100%** |
 | **8. 混合检索与向量融合层 (P1)** | SQLite FTS5 Trigram + 本地 384 维稠密向量 + RRF 倒数排名融合 | 已完整实现（`src/search/vector-engine.js`、`src/search/rrf.js`、`src/storage.js`）：双路并行召回 + 60 平滑因子 RRF 融合 + 词汇鸿沟语义泛化 + LIKE 优雅兜底 | **100%** |
-| **9. 动态知识地图注入 (P1)** | `memhub map` 自动生成当前项目 `<500 tokens` 的 `AGENTS.md` 知识地图节 | 规划至 **v0.2.0**（目前通过 MCP 工具和静态规则引导） | **0%** |
-| **10. Cursor 深度穿透 (P2)** | 穿透 `%APPDATA%/Cursor/.../state.vscdb` 读取 `composerData` 时序流 | 接口骨架与插槽已就绪（`src/adapters/cursor.js`），底层解析逻辑暂未填入（按既定策略延后） | **20%** |
-| **11. 研发态势与资产大盘** | `memhub stats` 全局与项目投入盘点、资产统计与盲区分析 | 已实现基础统计（分类分布、有效条目数、已扫描会话数），高阶文件改动频次与盲区预警待细化 | **70%** |
+| **9. 离线做梦与记忆熔炼 (P1 - 顶层热点)** | 闲时做梦机制（Dreaming）：碎片聚合、矛盾雷达、增量吸收、防重状态机与 L4 升华层 | 顶层架构设计已完成落盘（`docs/dreaming-architecture-design.md`），计划于 **v0.2.0** 核心落地 | **20% (设计已定稿)** |
+| **10. 认知读协议与触发规约增强 (P0)** | 强化 MCP 工具描述与读协议诱导，解决 LLM 不知何时读、怎么读、能做什么 | 技术设计定稿（`docs/read-protocol-and-stats-design.md`），正在落地推进 | **30%** |
+| **11. 研发态势与项目资产大盘 (P1)** | `memhub stats` 全局/项目研发态势与按 Project 维度分类资产大盘总结 | 已完整实现（`src/storage.js`、`src/cli.js`），支持 ASCII 可视化与 `--json` 输出 | **100%** |
+| **12. 动态知识地图注入 (P2)** | `memhub map` 自动生成当前项目 `<500 tokens` 的 `AGENTS.md` 知识地图节 | 评估识别痛点（开局任务未知），调整优先级至 v0.2.x 探索 | **0%** |
+| **13. Cursor 深度穿透 (P2)** | 穿透 `%APPDATA%/Cursor/.../state.vscdb` 读取 `composerData` 时序流 | 接口骨架与插槽已就绪（`src/adapters/cursor.js`），底层解析逻辑暂未填入（按既定策略延后） | **20%** |
 
 ---
 
@@ -98,15 +100,22 @@
 
 对照完整愿景，后续版本需分步推进以下模块：
 
-### 差距 1：动态知识地图自动注入 `memhub map` (P1)
+### 差距 1：离线做梦与记忆熔炼引擎 `memhub dream` (P1 - 顶层重点)
+- **当前状况**：已完成 5W2H 顶层方案、聚类公式、防重指纹表设计及生命周期流转规约（参见 `docs/dreaming-architecture-design.md`）。
+- **待做事项**：
+  1. 存储层 DDL 热自愈扩展：增加 `is_synthesized`、`status`、`consolidated_into` 等字段，新建 `knowledge_dream_history` 审计表；
+  2. 实现基于「Tag + File + 384维向量」三维相似度的无向连通子图聚类算法；
+  3. 打造闲时守护做梦流水线，结合宿主 LLM 完成多碎片升华为 L4 认知规范与矛盾雷达预警。
+
+### 差距 2：动态知识地图自动注入 `memhub map` (P1)
 - **当前状况**：目前依赖 Agent 自觉调用 MCP 工具检索。
 - **待做事项**：开发 `memhub map` 命令，根据当前项目目录名与近期代码改动关键词，实时精选 Top 3~5 条最相关的长效资产，生成严格 `<500 tokens` 的 Markdown 块动态注入项目根目录的 `AGENTS.md`。
 
-### 差距 2：研发态势大盘深度统计 (P1)
+### 差距 3：研发态势大盘深度统计 (P1)
 - **当前状况**：`memhub stats` 当前仅展示分类分布与扫描状态。
 - **待做事项**：深度解析 OpenCode 会话中的 `tokens_*`、`cost`、`summary_diffs` 字段，提供“投入精力分布、改动文件热点、高频报错未决预警”的高阶研发报表。
 
-### 差距 3：Cursor 桌面端无锁穿透 (P2)
+### 差距 4：Cursor 桌面端无锁穿透 (P2)
 - **当前状况**：已在 `src/adapters/cursor.js` 预留接口，目前返回空数组。
 - **待做事项**：以只读不锁模式（`?mode=ro&immutable=1`）穿透 `%APPDATA%/Cursor/User/globalStorage/state.vscdb`，解析 `composerData` 与 `bubbleId` 时序消息流。
 
@@ -129,9 +138,10 @@
                                   │
                                   ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ v0.2.0 智能检索与被动注入增强 (下一阶段重点)                      │
+│ v0.2.0 离线做梦与认知自省引擎 (下一阶段核心攻坚)                  │
+│ • 落地 memhub dream 做梦引擎 (碎片聚类 + 记忆熔炼 + 矛盾自省)    │
+│ • 引入 L4 认知升华层与增量吸收机制，彻底规避记忆碎片与认知精神分裂│
 │ • 实现 memhub map 动态生成 AGENTS.md 知识地图节 (<500 tokens)   │
-│ • 接入本地 ONNX 向量嵌入与 RRF 混合检索算法 (终结词汇鸿沟)          │
 │ • 细化 memhub stats 高阶研发投入与代码热点统计报表               │
 └─────────────────────────────────┬────────────────────────────────┘
                                   │

@@ -26,7 +26,8 @@ const suites = [
   { name: 'Layer 2: 宿主适配器层 (AgentAdapter + 动态时间过滤 + 防自循环)', cmd: 'node tests/test-adapters.js' },
   { name: 'Layer 3: 提炼与调度管道层 (Extractor 领域提炼 + Scanner 状态机)', cmd: 'node tests/test-extractor.js' },
   { name: 'Layer 4: 接口协议与呈现层 (Stdio JSON-RPC MCP 渐进式披露协议)', cmd: 'node tests/test-mcp-protocol.js' },
-  { name: '宿主驱动客户端与多策略动态端口探测', cmd: 'node tests/test-host-client.js' }
+  { name: '宿主驱动客户端与多策略动态端口探测', cmd: 'node tests/test-host-client.js' },
+  { name: '研发态势大盘与代码热点度量 (memhub stats)', cmd: 'node tests/test-stats.js' }
 ];
 
 try {
@@ -57,7 +58,7 @@ try {
   }
 
   console.log('====================================================');
-  console.log('🎉 8 大测试套件全部 100% 成功通过！');
+  console.log('🎉 10 大测试套件全部 100% 成功通过！');
   console.log('====================================================');
 } finally {
   // 清理临时测试沙箱

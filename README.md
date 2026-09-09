@@ -44,9 +44,13 @@
 - 🎯 **工作区隔离与多标签交集检索**：
   - 支持 `(project = ? OR project = 'global')` 物理隔离无关项目，同时穿透全局通用经验；
   - 基于 SQLite 原生 `json_each` 实现标签多值交集（AND）参数化精准收窄。
-- 🤖 **极简动宾 MCP 协议与大模型自主认知**：
-  - 核心工具全面升级为 `memhub_save`（存）、`memhub_search`（搜）、`memhub_get`（取）、`memhub_recent`（历）；
-  - 彻底消灭“叫 knowledge”的心智割裂，自解释 Schema 让大模型自主形成两阶段防爆 Token 行为。
+- 🤖 **极简动宾 MCP 协议与大模型认知读门禁**：
+  - 核心工具升级为 `memhub_save`（存）、`memhub_search`（搜）、`memhub_get`（取）、`memhub_recent`（历）；
+  - **破解“何时读、怎么读、能做什么”**：强化 Tool Description 显式注入 4 大调用时机（遇报错异常、动核心架构、定业务潜规则、方案选型），检索返回自带动态行动分支指引；
+  - **端到端调用审计日志 (`mcp_audit_logs`)**：自动捕获工具调用流水、查询关键词、命中条数与毫秒级耗时，非阻塞无感落盘。
+- 📊 **按 Project 项目维度分类大盘与效能度量 (`memhub stats`)**：
+  - 多维透视全局资产与四大分类分布；
+  - 自动按 Project 汇总排错、决策、模式与业务资产对比，量化估算规避试错节省的 Token 价值。
 - 🛡️ **物理终态成功证据门禁 (Truth Verification Gate)**：
   - 提炼引擎前置检验退出码 0、测试通过或服务就绪证据，严禁记录未经验证的猜测。
 - 🔒 **敏感凭据深度递归脱敏 (Secret Scrubbing)**：
@@ -147,11 +151,14 @@ memhub get kb-c3ffcbe1
 # 查看最近沉淀的知识索引（支持按项目与标签过滤）
 memhub list
 
+# 查看项目维度的研发态势大盘与知识资产统计（支持 --json, --detailed, --project <name>）
+memhub stats
+
+# 查看 MCP 工具调用审计流水与检索追踪（支持 --tool <name>, --project <name>, --json）
+memhub audit 20
+
 # 离线扫描已结束（超过静默时间）的历史会话状态
 memhub scan
-
-# 查看研发投入轨迹与知识资产统计大盘
-memhub stats
 
 # 执行 SQLite 原生 VACUUM INTO 原子无损热备份冷备
 memhub backup
@@ -174,9 +181,9 @@ MemHub 遵循“渐进式披露 (Progressive Disclosure)”与“自解释认知
 
 | 标准 MCP 工具名 | 角色与认知定位 | 大模型何时调用？怎么用？ |
 |:---|:---|:---|
-| **`memhub_search`** | **渐进式检索 - 阶段一**<br>(~50 Tokens 超轻量探测) | **动代码前必调**。输入 `query`（可带 `project`、`tags`、`category`），返回极简强指纹摘要。大模型负责先在上下文比对确认是否吻合。 |
-| **`memhub_get`** | **渐进式检索 - 阶段二**<br>(确定性高清 Markdown) | **确认吻合后再调**。传入 `ids: ["kb-xxx"]` 展开完整卡片（含业务背景、深层因果、验证正解、已排除误区与架构红线）。 |
-| **`memhub_save`** | **主动长效资产沉淀**<br>(工程认知持久化 / 原地 Upsert) | **攻克排错(learnings)、敲定决策(decisions)、写出模板(patterns)后调用**。传入 `session_id` 与 `topic_fingerprint` 自动原地更新覆盖，防止重复落库。 |
+| **`memhub_search`** | **渐进式检索 - 阶段一**<br>(~50 Tokens 超轻量探测) | **【必须前置触发】** 动代码/排错前必调。4大触发时机：①遇报错堆栈与测试失败时；②改鉴权/事务/锁等核心架构前；③处理复杂业务潜规则前；④方案选型二选一时。返回极简指纹摘要，自动记录审计日志。 |
+| **`memhub_get`** | **渐进式检索 - 阶段二**<br>(确定性高清 Markdown) | **【按需高清展开】** 比对命中吻合后再调。传入 `ids: ["kb-xxx"]` 展开完整卡片（含深层技术根因、验证正解、已排除误区、架构红线与可运行代码块）。 |
+| **`memhub_save`** | **主动长效资产沉淀**<br>(工程认知持久化 / 原地 Upsert) | **攻克排错(learnings)、敲定决策(decisions)、写出模板(patterns)、提炼业务(business)后调用**。传入 `session_id` 与 `topic_fingerprint` 自动原地更新覆盖，防止重复落库。 |
 | **`memhub_recent`** | **最近记忆轨迹速览**<br>(新会话破冰) | **新开会话、接手新项目时调用**。快速拉取最近演进，支持按 `project`（自动穿透 global 资产）和 `tags` 过滤。 |
 
 ---
@@ -219,11 +226,11 @@ MemHub 遵循“渐进式披露 (Progressive Disclosure)”与“自解释认知
 
 ## 🧪 测试与质量保障
 
-MemHub 拥有完整的分层自动化测试矩阵（涵盖路径引擎、配置防腐、存储内核、适配器动态过滤、管道提炼、Stdio MCP 渐进披露及 CLI 映射）：
+MemHub 拥有完整的分层自动化测试矩阵（涵盖 CLI 契约、路径过滤引擎、动态配置防腐、分层存储内核、混合向量 RRF 检索、适配器动态过滤、管道提炼、Stdio MCP 渐进披露、宿主客户端探测、按 Project 态势大盘与 MCP 调用审计）：
 
 ```bash
 npm test
-# 7 大测试套件 100% 自动化全绿灯通过
+# 10 大测试套件 100% 自动化全绿灯通过
 ```
 
 ---

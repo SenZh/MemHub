@@ -16,7 +16,8 @@ import {
   getKnowledgeBatch, 
   listRecent,
   backupDatabase,
-  getStats
+  getStats,
+  logMcpAccess
 } from './storage.js';
 
 const server = new Server(
@@ -136,7 +137,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
   const memhubSearchTool = {
     name: 'memhub_search',
-    description: '【两阶段渐进式检索 - 阶段一】在动手写代码、设计方案或排查报错前调用。支持关键词、工作区(project/workspace)、标签(tags)和分类过滤。仅返回 25-45 字强指纹摘要(~30-50 Tokens)，绝不撑爆上下文。大模型必须先比对返回的摘要，确认命中后再调用 memhub_get 拉取正文。',
+    description: '【两阶段渐进式检索 - 阶段一 | 必须前置触发】在工程暗知识库中检索历史排错根因、架构决策红线与业务隐性规则。\n' +
+      '【何时必须调用】\n' +
+      '1. 遇到报错堆栈、构建失败、测试挂掉时（先查既有排错因果链，严禁盲目猜测修改代码）；\n' +
+      '2. 准备修改鉴权、事务、锁、并发、多租户等核心架构前（核对历史 ADR 决策与架构红线）；\n' +
+      '3. 处理支付、充值、订单状态流转等复杂业务逻辑前（检索隐性业务潜规则）；\n' +
+      '4. 面临技术方案二选一或重构代码前。\n' +
+      '【怎么读】仅返回轻量强指纹摘要(~30-50 Tokens)，绝不撑爆上下文。比对命中后，必须立即调用 memhub_get 拉取正文详情。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -159,8 +166,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
         category: {
           type: 'string',
-          enum: ['learnings', 'decisions', 'patterns'],
-          description: '可选：限定分类（learnings=排错, decisions=架构决策, patterns=代码模板）'
+          enum: ['learnings', 'decisions', 'patterns', 'business'],
+          description: '可选：限定分类（learnings=排错, decisions=架构决策, patterns=代码模板, business=业务潜规则）'
         },
         limit: {
           type: 'number',
@@ -173,14 +180,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
   const memhubGetTool = {
     name: 'memhub_get',
-    description: '【两阶段渐进式检索 - 阶段二】当 memhub_search 返回的某条摘要与当前问题高度吻合时，调用此工具拉取该卡片的完整 Markdown 详情（包含详细业务背景、技术根因、真实修复代码、已排除误区与架构红线）。',
+    description: '【两阶段渐进式检索 - 阶段二 | 详情与代码展开】当 memhub_search 返回的摘要与当前场景/报错吻合时调用。\n' +
+      '【能做什么】拉取完整结构化长效知识，包括：深层技术根因分析、踩坑误区清单、架构红线硬约束、以及经过自测验证的标准代码/配置片段。支持传入单一 id 或 ids 数组批量拉取。',
     inputSchema: {
       type: 'object',
       properties: {
         ids: {
           type: 'array',
           items: { type: 'string' },
-          description: '要拉取详情的记忆卡片 ID 列表 (例如 ["kb-c3ffcbe1"])'
+          description: '要拉取详情的记忆卡片 ID 列表 (例如 ["kb-c3ffcbe1", "kb-7d6f60b8"])'
         },
         id: {
           type: 'string',
@@ -233,163 +241,208 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-// 2. 处理工具调用请求 (CallTool)
+// 2. 处理工具调用请求 (CallTool) - 带审计日志切面
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+  const startMs = Date.now();
+  let status = 'SUCCESS';
+  let errorMessage = null;
+  let hitsCount = 0;
+  let querySummary = null;
 
-  switch (name) {
-    case 'memhub_save':
-    case 'hub_record_knowledge':
-    case 'exo_record_knowledge': {
-      try {
-        const result = recordKnowledge(args);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(result, null, 2)
-            }
-          ]
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [{ type: 'text', text: `沉淀知识失败: ${error.message}` }]
-        };
+  try {
+    switch (name) {
+      case 'memhub_save':
+      case 'hub_record_knowledge':
+      case 'exo_record_knowledge': {
+        querySummary = args?.title || null;
+        try {
+          const result = recordKnowledge(args);
+          hitsCount = result?.success ? 1 : 0;
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2)
+              }
+            ]
+          };
+        } catch (error) {
+          status = 'ERROR';
+          errorMessage = error.message;
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `沉淀知识失败: ${error.message}` }]
+          };
+        }
       }
-    }
 
-    case 'memhub_search':
-    case 'hub_search_knowledge':
-    case 'exo_search_knowledge': {
-      try {
-        const results = searchKnowledge(args.query, {
-          category: args.category,
-          project: args.project || args.workspace,
-          tags: args.tags,
-          limit: args.limit || 5
-        });
+      case 'memhub_search':
+      case 'hub_search_knowledge':
+      case 'exo_search_knowledge': {
+        querySummary = args?.query || null;
+        try {
+          const results = searchKnowledge(args.query, {
+            category: args.category,
+            project: args.project || args.workspace,
+            tags: args.tags,
+            limit: args.limit || 5
+          });
 
-        if (!results || results.length === 0) {
+          hitsCount = results ? results.length : 0;
+
+          if (!results || results.length === 0) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    total_hits: 0,
+                    message: `未检索到与 "${args.query}" 相关的历史暗知识或架构决策。`,
+                    results: []
+                  }, null, 2)
+                }
+              ]
+            };
+          }
+
+          // 渐进式披露 L1 核心返回，附带明确的 instruction 引导
+          const payload = {
+            total_hits: results.length,
+            instruction: `已检索到 ${results.length} 条相关记忆索引。请比对是否与当前问题或报错场景吻合。\n` +
+              `• 若吻合：请立即调用 memhub_get(ids=[...]) 获取该方案的完整技术根因、正解代码与避坑指南，依循历史最佳实践编写代码；\n` +
+              `• 若均不吻合：说明暂无相关历史沉淀，请继续常规排查或编码。`,
+            results: results.map(r => ({
+              id: r.id,
+              title: r.title,
+              category: r.category,
+              project: r.project,
+              tags: r.tags,
+              summary: r.summary,
+              related_files: r.related_files
+            }))
+          };
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(payload, null, 2)
+              }
+            ]
+          };
+        } catch (error) {
+          status = 'ERROR';
+          errorMessage = error.message;
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `检索知识失败: ${error.message}` }]
+          };
+        }
+      }
+
+      case 'memhub_get':
+      case 'hub_get_knowledge':
+      case 'exo_get_knowledge': {
+        try {
+          // 支持单个 id 或 ids 数组
+          let targetIds = [];
+          if (Array.isArray(args.ids)) {
+            targetIds = args.ids;
+          } else if (args.id) {
+            targetIds = [args.id];
+          }
+
+          querySummary = targetIds.join(', ');
+
+          if (targetIds.length === 0) {
+            throw new Error('缺少必填参数 id 或 ids 列表');
+          }
+
+          const details = getKnowledgeBatch(targetIds);
+          hitsCount = details ? details.length : 0;
+
+          if (details.length === 0) {
+            return {
+              isError: true,
+              content: [{ type: 'text', text: `未找到 ID 为 [${targetIds.join(', ')}] 的知识卡片。` }]
+            };
+          }
+
+          // 若只查单条，直接返回单条 Markdown；若多条，组合返回
+          const combinedText = details.map(d => d.content).join('\n\n---\n\n');
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: combinedText
+              }
+            ]
+          };
+        } catch (error) {
+          status = 'ERROR';
+          errorMessage = error.message;
+          return {
+            isError: true,
+            content: [{ type: 'text', text: `读取知识详情失败: ${error.message}` }]
+          };
+        }
+      }
+
+      case 'memhub_recent':
+      case 'hub_list_recent':
+      case 'exo_list_recent': {
+        querySummary = `limit=${args.limit || 10}`;
+        try {
+          const results = listRecent({
+            limit: args.limit || 10,
+            project: args.project
+          });
+          hitsCount = results ? results.length : 0;
+
           return {
             content: [
               {
                 type: 'text',
                 text: JSON.stringify({
-                  total_hits: 0,
-                  message: `未检索到与 "${args.query}" 相关的历史暗知识或架构决策。`,
-                  results: []
+                  total: results.length,
+                  results
                 }, null, 2)
               }
             ]
           };
-        }
-
-        // 渐进式披露 L1 核心返回，附带明确的 instruction 引导
-        const payload = {
-          total_hits: results.length,
-          instruction: `已命中 ${results.length} 条相关记忆索引。请比对是否与当前问题吻合。如需完整技术根因、正解代码与修改步骤，请立即调用 memhub_get(ids=[...]) 获取详情。`,
-          results: results.map(r => ({
-            id: r.id,
-            title: r.title,
-            category: r.category,
-            project: r.project,
-            tags: r.tags,
-            summary: r.summary,
-            related_files: r.related_files
-          }))
-        };
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(payload, null, 2)
-            }
-          ]
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [{ type: 'text', text: `检索知识失败: ${error.message}` }]
-        };
-      }
-    }
-
-    case 'memhub_get':
-    case 'hub_get_knowledge':
-    case 'exo_get_knowledge': {
-      try {
-        // 支持单个 id 或 ids 数组
-        let targetIds = [];
-        if (Array.isArray(args.ids)) {
-          targetIds = args.ids;
-        } else if (args.id) {
-          targetIds = [args.id];
-        }
-
-        if (targetIds.length === 0) {
-          throw new Error('缺少必填参数 id 或 ids 列表');
-        }
-
-        const details = getKnowledgeBatch(targetIds);
-
-        if (details.length === 0) {
+        } catch (error) {
+          status = 'ERROR';
+          errorMessage = error.message;
           return {
             isError: true,
-            content: [{ type: 'text', text: `未找到 ID 为 [${targetIds.join(', ')}] 的知识卡片。` }]
+            content: [{ type: 'text', text: `拉取最近列表失败: ${error.message}` }]
           };
         }
-
-        // 若只查单条，直接返回单条 Markdown；若多条，组合返回
-        const combinedText = details.map(d => d.content).join('\n\n---\n\n');
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: combinedText
-            }
-          ]
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [{ type: 'text', text: `读取知识详情失败: ${error.message}` }]
-        };
       }
+
+      default:
+        status = 'ERROR';
+        errorMessage = `未知工具: ${name}`;
+        throw new McpError(ErrorCode.MethodNotFound, errorMessage);
     }
-
-    case 'memhub_recent':
-    case 'hub_list_recent':
-    case 'exo_list_recent': {
-      try {
-        const results = listRecent({
-          limit: args.limit || 10,
-          project: args.project
-        });
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                total: results.length,
-                results
-              }, null, 2)
-            }
-          ]
-        };
-      } catch (error) {
-        return {
-          isError: true,
-          content: [{ type: 'text', text: `拉取最近列表失败: ${error.message}` }]
-        };
-      }
-    }
-
-    default:
-      throw new McpError(ErrorCode.MethodNotFound, `未知工具: ${name}`);
+  } finally {
+    // 异步无阻断记录审计日志流水
+    const durationMs = Date.now() - startMs;
+    try {
+      logMcpAccess({
+        tool_name: name,
+        project: args?.project || args?.workspace || null,
+        session_id: args?.session_id || null,
+        query_summary: querySummary,
+        input_payload: args,
+        hits_count: hitsCount,
+        duration_ms: durationMs,
+        status,
+        error_message: errorMessage
+      });
+    } catch {}
   }
 });
 

@@ -137,7 +137,31 @@ async function runTest() {
   console.log('List 工具响应:\n' + recentRes.result?.content?.[0]?.text);
   assert(!recentRes.result?.isError);
 
-  console.log('\n🎉 端到端 JSON-RPC stdio MCP 协议集成测试全部通过！');
+  console.log('\n--- 7. 验证 MCP 调用审计日志落盘 (mcp_audit_logs) ---');
+  const { getMcpAuditLogs } = await import('../src/storage.js');
+  const auditLogs = getMcpAuditLogs({ limit: 10 });
+  console.log(`已捕获 MCP 审计日志数: ${auditLogs.length}`);
+  assert.ok(auditLogs.length >= 4, '应至少捕获 save/search/get/recent 4 次调用流水');
+  
+  const saveLog = auditLogs.find(l => l.tool_name === 'memhub_save');
+  assert.ok(saveLog);
+  assert.equal(saveLog.status, 'SUCCESS');
+  assert.match(saveLog.query_summary, /SecurityFilterChain/);
+
+  const searchLog = auditLogs.find(l => l.tool_name === 'memhub_search');
+  assert.ok(searchLog);
+  assert.equal(searchLog.status, 'SUCCESS');
+  assert.equal(searchLog.query_summary, '循环依赖');
+  assert.ok(searchLog.hits_count >= 1);
+
+  const getLog = auditLogs.find(l => l.tool_name === 'memhub_get');
+  assert.ok(getLog);
+  assert.equal(getLog.status, 'SUCCESS');
+  assert.ok(getLog.hits_count >= 1);
+
+  console.log('   ✅ MCP 审计日志落盘字段与耗时捕获验证通过！');
+
+  console.log('\n🎉 端到端 JSON-RPC stdio MCP 协议与审计流水测试全部通过！');
   child.kill();
   process.exit(0);
 }

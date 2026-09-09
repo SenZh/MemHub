@@ -18,6 +18,7 @@
     "test:extractor": "node tests/test-extractor.js",
     "test:mcp": "node tests/test-mcp-protocol.js",
     "test:path-filter": "node tests/test-path-filter.js",
+    "test:stats": "node tests/test-stats.js",
     "test:cli": "node tests/test-cli.js"
   },
   "dependencies": {

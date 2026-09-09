@@ -8,7 +8,8 @@ import {
   backupDatabase, 
   exportToMarkdown, 
   getStats,
-  syncEmbeddings
+  syncEmbeddings,
+  getMcpAuditLogs
 } from './storage.js';
 import { runOfflineScan } from './scanner.js';
 import { 
@@ -34,7 +35,9 @@ MemHub (memhub / mem-hub) CLI - AI 编程知识中枢与工程长效记忆
   memhub find <关键词>         全文检索历史避坑经验与架构决策 (支持 FTS5 Trigram 模糊匹配)
   memhub get <id>              查看某张知识卡片的完整详细内容与代码正文
   memhub list [条数]           查看最近沉淀的高密度知识索引列表
-  memhub stats                 查看全局或项目维度的研发态势与知识资产统计
+  memhub stats [选项]          查看全局/项目研发态势、代码踩坑热点与风险预警
+                               (支持 --detailed, --json, --project <name>)
+  memhub audit [条数]          查看 MCP 工具调用审计流水 (支持 --tool <name>, --json)
   memhub backup [路径]         执行 SQLite 原生 VACUUM INTO 无损原子热备份
   memhub export [目录]         将 SQLite 数据库无损导出为结构化 Markdown 目录树 (Obsidian兼容)
   memhub embed                 全量/增量为已有知识计算 384 维语义向量并持久化
@@ -187,21 +190,60 @@ switch (command) {
   }
 
   case 'stats': {
-    const project = args[1] || null;
+    let project = null;
+    let jsonMode = false;
+    let detailed = false;
+
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--json') {
+        jsonMode = true;
+      } else if (args[i] === '--detailed') {
+        detailed = true;
+      } else if (args[i] === '--project' && args[i + 1]) {
+        project = args[++i];
+      } else if (!args[i].startsWith('-') && !project) {
+        project = args[i];
+      }
+    }
+
     const stats = getStats({ project });
-    console.log(`\n📊 MemHub 研发资产与态势统计:`);
-    console.log(`----------------------------------------`);
-    console.log(`作用范围: ${stats.project}`);
-    console.log(`有效知识总数: ${stats.total_knowledge_entries} 篇`);
-    console.log(`\n分类分布:`);
+
+    if (jsonMode) {
+      console.log(JSON.stringify(stats, null, 2));
+      break;
+    }
+
+    console.log(`\n============================================================`);
+    console.log(`              📊 MemHub 研发态势与知识资产大盘              `);
+    console.log(`============================================================`);
+    console.log(`【作用范围】: ${stats.project}`);
+    console.log(`【长效资产】: ${stats.total_knowledge_entries} 篇 (估算规避试错节省 ~${stats.estimated_saved_tokens.toLocaleString()} tokens)`);
+    
+    console.log(`\n【📂 四大基石分类分布】:`);
     if (stats.categories.length === 0) {
       console.log(`  (暂无分类数据)`);
     } else {
+      const maxCount = Math.max(...stats.categories.map(c => c.count), 1);
       stats.categories.forEach(c => {
-        console.log(`  • ${c.category.padEnd(15)}: ${c.count} 篇`);
+        const barLen = Math.max(1, Math.round((c.count / maxCount) * 16));
+        const bar = '█'.repeat(barLen).padEnd(16);
+        console.log(`  • ${c.category.padEnd(12)} [${bar}] ${c.count} 篇`);
       });
     }
-    console.log(`\n会话萃取状态:`);
+
+    console.log(`\n【🏢 按 Project 项目维度汇总分布】:`);
+    if (!stats.projects || stats.projects.length === 0) {
+      console.log(`  (暂无项目维度数据)`);
+    } else {
+      const maxProjCount = Math.max(...stats.projects.map(p => p.total), 1);
+      stats.projects.forEach(p => {
+        const barLen = Math.max(1, Math.round((p.total / maxProjCount) * 12));
+        const bar = '█'.repeat(barLen).padEnd(12);
+        console.log(`  • ${p.project.padEnd(18)} [${bar}] 总计: ${String(p.total).padStart(2)} 篇 (排错: ${p.learnings}, 决策: ${p.decisions}, 模式: ${p.patterns}, 业务: ${p.business})`);
+      });
+    }
+
+    console.log(`\n【🤖 会话扫描与萃取流水】:`);
     if (stats.sessions_scanned.length === 0) {
       console.log(`  (暂未扫描历史会话)`);
     } else {
@@ -209,7 +251,62 @@ switch (command) {
         console.log(`  • 状态 ${s.status.padEnd(12)}: ${s.count} 个会话`);
       });
     }
-    console.log(`----------------------------------------\n`);
+
+    console.log(`\n【⚡ MCP 工具调用频次与响应】:`);
+    if (!stats.mcp_tool_calls || stats.mcp_tool_calls.length === 0) {
+      console.log(`  (暂无 MCP 调用审计记录)`);
+    } else {
+      stats.mcp_tool_calls.forEach(m => {
+        const avg = m.avg_duration_ms ? `${Math.round(m.avg_duration_ms)}ms` : '0ms';
+        console.log(`  • ${m.tool_name.padEnd(20)}: ${String(m.count).padStart(4)} 次 (平均耗时: ${avg})`);
+      });
+    }
+    console.log(`============================================================\n`);
+    break;
+  }
+
+  case 'audit': {
+    let limit = 20;
+    let tool = null;
+    let project = null;
+    let jsonMode = false;
+
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--json') {
+        jsonMode = true;
+      } else if (args[i] === '--tool' && args[i + 1]) {
+        tool = args[++i];
+      } else if (args[i] === '--project' && args[i + 1]) {
+        project = args[++i];
+      } else if (!isNaN(parseInt(args[i], 10))) {
+        limit = parseInt(args[i], 10);
+      }
+    }
+
+    const logs = getMcpAuditLogs({ limit, tool, project });
+
+    if (jsonMode) {
+      console.log(JSON.stringify(logs, null, 2));
+      break;
+    }
+
+    console.log(`\n============================================================`);
+    console.log(`              🔍 MemHub MCP 工具调用审计流水                `);
+    console.log(`============================================================`);
+    if (logs.length === 0) {
+      console.log(`  (暂无 MCP 调用审计记录)`);
+    } else {
+      logs.forEach(l => {
+        const timeStr = new Date(l.created_at).toISOString().replace('T', ' ').slice(0, 19);
+        const statusBadge = l.status === 'SUCCESS' ? '✅' : '❌';
+        const durationStr = `${l.duration_ms}ms`.padStart(6);
+        const toolStr = l.tool_name.padEnd(16);
+        const projStr = (l.project || 'global').padEnd(12);
+        const queryStr = (l.query_summary || '-').slice(0, 45);
+        console.log(`[${timeStr}] ${statusBadge} ${toolStr} | ${projStr} | 耗时:${durationStr} | 命中:${String(l.hits_count).padStart(2)} | 目标: ${queryStr}`);
+      });
+    }
+    console.log(`============================================================\n`);
     break;
   }
 

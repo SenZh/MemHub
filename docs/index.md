@@ -7,8 +7,10 @@ MemHub 是专为 AI 编程与软件工程设计的**工程长效记忆与暗知�
 核心差异化：**借宿主 Agent 算力提炼（0 外部 API）+ 专注高密度工程决策与排错因果 + 单文件 SQLite 工业内核与 DDL 自愈 + 极简动宾 memhub_* 两阶段渐进披露协议 + 物理终态证据门禁 (Truth Gate) + 灵活路径 include/exclude 规则**。
 
 ## 2. 核心文档清单
-- [目标差距分析与演进计划书 (Roadmap & Progress)](./roadmap-and-progress.md)：当前 v0.1.1 已完成模块、全量设计目标差距对比（Gap Analysis）、下一版本规划（v0.2.0 后台定时扫描与知识地图）与演进路线。
-- [需求规格与系统边界 (Requirements & Boundaries)](./requirements-and-boundaries.md)：核心定位、价值密度原则、两级空间、三大基石分类结构化要素清单与多维过滤检索契约。
+- [目标差距分析与演进计划书 (Roadmap & Progress)](./roadmap-and-progress.md)：当前已完成模块、全量设计目标差距对比（Gap Analysis）、下一版本规划（v0.2.0 做梦自省引擎与知识地图）与演进路线。
+- [认知读协议与研发态势大盘技术设计 (Read Protocol & Stats)](./read-protocol-and-stats-design.md)：明确 LLM 记忆读协议、4 大触发门禁、MCP Tool 诱导描述与 `memhub stats` 代码热点大盘设计。
+- [AI 做梦引擎顶层架构设计 (Dreaming Architecture)](./dreaming-architecture-design.md)：5W2H 顶层设计矩阵、碎片聚类评分模型、L4 认知升华层、防重指纹表与卡片生命周期状态机。
+- [需求规格与系统边界 (Requirements & Boundaries)](./requirements-and-boundaries.md)：核心定位、价值密度原则、两级空间、四大基石分类结构化要素清单与多维过滤检索契约。
 - [完整架构与演进蓝图 (System Architecture & Roadmap)](./architecture-design.md)：单文件 SQLite 物理分层与 DDL 迁移模型、memhub_* 极简动宾协议、离线扫描状态机。
 
 ## 3. 核心设计原则
