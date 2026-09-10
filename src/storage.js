@@ -1064,6 +1064,9 @@ export function getStats(options = {}) {
     `).all();
   } catch {}
 
+  // 7. 做梦引擎自省成效大盘 (过程台账 + 产物 + 候选池)
+  const dreaming = getDreamingStats(db, project);
+
   return {
     project: project || 'all_projects',
     total_knowledge_entries: totalCount,
@@ -1071,8 +1074,93 @@ export function getStats(options = {}) {
     sessions_scanned: sessionStats,
     projects: projectsSummary,
     mcp_tool_calls: mcpStats,
-    estimated_saved_tokens: estimatedSavedTokens
+    estimated_saved_tokens: estimatedSavedTokens,
+    dreaming
   };
+}
+
+/**
+ * 做梦引擎成效统计
+ * - synthesized_l4: 做梦升华产出的 L4 认知规范卡片 (is_synthesized = 1, active)
+ * - consolidated_fragments: 被熔炼封存的原始碎片 (status = consolidated)
+ * - dream_rounds: 做梦台账轮次 (knowledge_dream_history)
+ * - candidate_pool: 当前仍待做梦的候选碎片池 (active 且非合成且过冷却期)
+ * - cooling_down: 处于失败冷却期的碎片数
+ */
+function getDreamingStats(db, project) {
+  const result = {
+    synthesized_l4: 0,
+    consolidated_fragments: 0,
+    dream_rounds: 0,
+    candidate_pool: 0,
+    cooling_down: 0
+  };
+
+  try {
+    let synthSql = `SELECT COUNT(*) as c FROM knowledge_items WHERE status = 'active' AND is_synthesized = 1`;
+    const synthParams = [];
+    if (project) {
+      synthSql += ` AND project = ?`;
+      synthParams.push(project);
+    }
+    result.synthesized_l4 = db.prepare(synthSql).get(...synthParams)?.c || 0;
+
+    let fragSql = `SELECT COUNT(*) as c FROM knowledge_items WHERE status = 'consolidated'`;
+    const fragParams = [];
+    if (project) {
+      fragSql += ` AND project = ?`;
+      fragParams.push(project);
+    }
+    result.consolidated_fragments = db.prepare(fragSql).get(...fragParams)?.c || 0;
+
+    const now = Date.now();
+    let candSql = `
+      SELECT COUNT(*) as c FROM knowledge_items
+      WHERE status = 'active'
+        AND (is_synthesized IS NULL OR is_synthesized = 0)
+        AND (dream_skip_until IS NULL OR dream_skip_until <= ?)
+    `;
+    const candParams = [now];
+    if (project) {
+      candSql += ` AND project = ?`;
+      candParams.push(project);
+    }
+    result.candidate_pool = db.prepare(candSql).get(...candParams)?.c || 0;
+
+    let coolSql = `
+      SELECT COUNT(*) as c FROM knowledge_items
+      WHERE status = 'active'
+        AND (is_synthesized IS NULL OR is_synthesized = 0)
+        AND dream_skip_until > ?
+    `;
+    const coolParams = [now];
+    if (project) {
+      coolSql += ` AND project = ?`;
+      coolParams.push(project);
+    }
+    result.cooling_down = db.prepare(coolSql).get(...coolParams)?.c || 0;
+
+    // 做梦台账按 project 过滤：通过 source_ids 关联的碎片归属项目，无归属时计为全局
+    const roundsRows = db.prepare(`SELECT source_ids FROM knowledge_dream_history`).all();
+    if (!project) {
+      result.dream_rounds = roundsRows.length;
+    } else {
+      let count = 0;
+      for (const row of roundsRows) {
+        let ids = [];
+        try { ids = JSON.parse(row.source_ids); } catch {}
+        if (!Array.isArray(ids) || ids.length === 0) continue;
+        const placeholders = ids.map(() => '?').join(',');
+        const hit = db.prepare(
+          `SELECT COUNT(*) as c FROM knowledge_items WHERE id IN (${placeholders}) AND project = ?`
+        ).get(...ids, project);
+        if (hit?.c > 0) count++;
+      }
+      result.dream_rounds = count;
+    }
+  } catch {}
+
+  return result;
 }
 
 /**

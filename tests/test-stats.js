@@ -9,6 +9,7 @@ const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'memhub-test-stats-'));
 process.env.MEMHUB_HOME = testDir;
 
 const { recordKnowledge, getStats, closeDatabase } = await import('../src/storage.js');
+const { applyDreamConsolidation } = await import('../src/dream/pipeline.js');
 
 test('MemHub Stats 研发态势与按 Project 资产分布大盘', async (t) => {
   await t.test('1. 空数据初始状态断言', () => {
@@ -77,6 +78,65 @@ test('MemHub Stats 研发态势与按 Project 资产分布大盘', async (t) => 
     assert.equal(filteredStats.projects[0].project, 'project-alpha');
   });
 
+  await t.test('2.1 做梦引擎维度统计：升华卡片/封存碎片/台账轮次/候选池', () => {
+    // 初始无做梦记录，候选池应含已有的非合成 active 卡片
+    const before = getStats({ project: 'project-alpha' });
+    assert.equal(before.dreaming.synthesized_l4, 0);
+    assert.equal(before.dreaming.consolidated_fragments, 0);
+    assert.equal(before.dreaming.dream_rounds, 0);
+    assert.equal(before.dreaming.candidate_pool, 2);
+
+    // 模拟做梦熔炼：把 project-alpha 的两张碎片合成一张 L4
+    const fragA = recordKnowledge({
+      title: '[Auth/JWT] 碎片一',
+      category: 'learnings',
+      tags: ['auth'],
+      context: '碎片一上下文',
+      solution: '碎片一修复',
+      project: 'project-alpha'
+    });
+    const fragB = recordKnowledge({
+      title: '[Auth/JWT] 碎片二',
+      category: 'learnings',
+      tags: ['auth'],
+      context: '碎片二上下文',
+      solution: '碎片二修复',
+      project: 'project-alpha'
+    });
+
+    applyDreamConsolidation({
+      cluster: {
+        project: 'project-alpha',
+        fingerprint: 'fp-stats-test-001',
+        card_ids: [fragA.id, fragB.id]
+      },
+      synthesizedCard: {
+        title: '[Auth/JWT] 统一鉴权规范',
+        category: 'patterns',
+        tags: ['auth', 'jwt'],
+        solution: '统一走鉴权中间件'
+      }
+    });
+
+    const after = getStats({ project: 'project-alpha' });
+    assert.equal(after.dreaming.synthesized_l4, 1);
+    assert.equal(after.dreaming.consolidated_fragments, 2);
+    assert.equal(after.dreaming.dream_rounds, 1);
+    // 原本 2 张候选被熔炼后：被合成卡不计入候选、被熔炼碎片不计入候选、新增碎片计入候选
+    assert.equal(after.dreaming.candidate_pool, 2);
+
+    // 全局视角同样可见做梦成效
+    const globalAfter = getStats();
+    assert.equal(globalAfter.dreaming.synthesized_l4, 1);
+    assert.equal(globalAfter.dreaming.consolidated_fragments, 2);
+    assert.equal(globalAfter.dreaming.dream_rounds, 1);
+
+    // project-beta 未参与做梦，应看不到熔炼轮次
+    const betaStats = getStats({ project: 'project-beta' });
+    assert.equal(betaStats.dreaming.dream_rounds, 0);
+    assert.equal(betaStats.dreaming.synthesized_l4, 0);
+  });
+
   await t.test('3. 验证 CLI 命令 stats 输出与 --json 模式', () => {
     const cliPath = path.resolve('src/cli.js');
     
@@ -87,6 +147,7 @@ test('MemHub Stats 研发态势与按 Project 资产分布大盘', async (t) => 
     });
     assert.match(textOutput, /MemHub 研发态势与知识资产大盘/);
     assert.match(textOutput, /按 Project 项目维度汇总分布/);
+    assert.match(textOutput, /做梦引擎自省与认知熔炼/);
     assert.match(textOutput, /project-alpha/);
     assert.match(textOutput, /project-beta/);
 
@@ -96,9 +157,13 @@ test('MemHub Stats 研发态势与按 Project 资产分布大盘', async (t) => 
       encoding: 'utf-8'
     });
     const parsed = JSON.parse(jsonOutput);
-    assert.equal(parsed.total_knowledge_entries, 3);
+    // 3 张初始卡 + 1 张做梦升华卡 = 4 张 active 资产
+    assert.equal(parsed.total_knowledge_entries, 4);
     assert.equal(parsed.projects.length, 2);
     assert.equal(parsed.projects[0].project, 'project-alpha');
+    assert.equal(parsed.dreaming.synthesized_l4, 1);
+    assert.equal(parsed.dreaming.consolidated_fragments, 2);
+    assert.equal(parsed.dreaming.dream_rounds, 1);
   });
 
   t.after(() => {

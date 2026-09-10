@@ -6,7 +6,13 @@ import {
   dispatchExtractionPrompt,
   readSessionMessages,
   listCandidateSessions,
-  getSessionUpdatedTime
+  getSessionUpdatedTime,
+  isSubagentSession,
+  forkSession,
+  getSessionStatus,
+  getLastAssistantProgress,
+  waitForSessionIdle,
+  deleteSession
 } from '../src/host/opencode-client.js';
 
 console.log('=== [单测: OpenCode 宿主驱动客户端 opencode-client] ===');
@@ -14,11 +20,55 @@ console.log('=== [单测: OpenCode 宿主驱动客户端 opencode-client] ===');
 let server;
 let receivedPaths = [];
 let mockSessionsData = [];
+let mockStatusMap = {};
+let mockForkCounter = 0;
+let deletedIds = [];
+let mockMessages = [];
 
 function startMockServer() {
   return new Promise((resolve) => {
     server = http.createServer((req, res) => {
       receivedPaths.push(req.url);
+
+      // fork: POST /session/:id/fork
+      const forkMatch = req.url.match(/^\/session\/([^/]+)\/fork$/);
+      if (forkMatch && req.method === 'POST') {
+        mockForkCounter++;
+        const newId = `ses-fork-${mockForkCounter}`;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          id: newId,
+          directory: 'D:/workspace/some-project',
+          title: '原会话 (fork #1)'
+        }));
+        return;
+      }
+
+      // 单个会话 DELETE
+      const oneMatch = req.url.match(/^\/session\/([^/]+)$/);
+      if (oneMatch && req.method === 'DELETE') {
+        deletedIds.push(oneMatch[1]);
+        mockStatusMap[oneMatch[1]] = undefined;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('true');
+        return;
+      }
+
+      // 会话状态映射
+      if (req.url === '/session/status' && req.method === 'GET') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(mockStatusMap));
+        return;
+      }
+
+      // 会话消息（用于 getLastAssistantProgress）
+      const msgMatch = req.url.match(/^\/session\/([^/]+)\/message$/);
+      if (msgMatch && req.method === 'GET') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(mockMessages));
+        return;
+      }
+
       if (req.url.startsWith('/global/health')) {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ healthy: true, version: '1.18.16' }));
@@ -47,6 +97,10 @@ function stopMockServer() {
   return new Promise((resolve) => {
     receivedPaths = [];
     mockSessionsData = [];
+    mockStatusMap = {};
+    mockForkCounter = 0;
+    deletedIds = [];
+    mockMessages = [];
     server.close(() => resolve());
   });
 }
@@ -207,4 +261,91 @@ try {
   await stopMockServer();
 }
 
-console.log('\n🎉 OpenCode 宿主驱动客户端 9 项断言全部通过！');
+console.log('10. isSubagentSession 拦截 fork 抽取副本，防止套娃循环抽取...');
+{
+  // fork 副本：无 parentID、目录继承原会话，仅标题带 (fork #N)
+  assert.equal(isSubagentSession({ id: 'ses-f1', directory: 'D:/x', title: '实现功能 (fork #1)' }), true, '(fork #1) 应被识别为派生会话');
+  assert.equal(isSubagentSession({ id: 'ses-f2', directory: 'D:/x', title: '多轮改造 (Fork #12)' }), true, '(Fork #12) 大小写不敏感也应拦截');
+  // 正常主会话标题若含 fork 但非 (fork #N) 结尾，不应误杀
+  assert.equal(isSubagentSession({ id: 'ses-m1', directory: 'D:/x', title: '讨论 fork 机制的设计' }), false, '普通含 fork 字样的主会话不应被误杀');
+  assert.equal(isSubagentSession({ id: 'ses-m2', title: '主会话 (fork #1) 后续分析' }), false, 'fork 标记不在结尾不应误杀');
+  console.log('   ✅ (fork #N) 结尾特征精准拦截，普通会话不误伤');
+}
+
+console.log('11. forkSession 发起 fork 并返回副本会话...');
+const p6 = await startMockServer();
+try {
+  const baseUrl = `http://127.0.0.1:${p6}`;
+  const fork = await forkSession(baseUrl, 'ses-origin');
+  assert.equal(fork.id, 'ses-fork-1', 'fork 应返回新会话 id');
+  assert.equal(fork.directory, 'D:/workspace/some-project', 'fork 继承原目录');
+  assert(receivedPaths.some(u => u === '/session/ses-origin/fork'), '应命中 fork 端点');
+  console.log('   ✅ fork 成功并可取得副本 id/目录');
+} finally {
+  await stopMockServer();
+}
+
+console.log('12. getSessionStatus + waitForSessionIdle 轮询直至 idle...');
+const p7 = await startMockServer();
+try {
+  const baseUrl = `http://127.0.0.1:${p7}`;
+  mockStatusMap = { 'ses-fork-x': { type: 'busy' } };
+  const st = await getSessionStatus(baseUrl, 'ses-fork-x');
+  assert.equal(st, 'busy', '应读取到 busy 状态');
+  assert.equal(await getSessionStatus(baseUrl, 'ses-nope'), 'unknown', '未知会话应返回 unknown');
+
+  // 200ms 后置为 idle，验证轮询能收敛
+  setTimeout(() => { mockStatusMap['ses-fork-x'] = { type: 'idle' }; }, 250);
+  const waited = await waitForSessionIdle(baseUrl, 'ses-fork-x', { pollIntervalMs: 100, maxWaitMs: 3000 });
+  assert.equal(waited.completed, true, '应轮询到 idle 判定完成');
+  assert.equal(waited.finalStatus, 'idle');
+  console.log(`   ✅ 轮询收敛，耗时 ${waited.waitedMs}ms`);
+} finally {
+  await stopMockServer();
+}
+
+console.log('13. deleteSession 清理 fork 副本（含失败兜底）...');
+const p8 = await startMockServer();
+try {
+  const baseUrl = `http://127.0.0.1:${p8}`;
+  mockStatusMap['ses-fork-z'] = { type: 'idle' };
+  const ok = await deleteSession(baseUrl, 'ses-fork-z');
+  assert.equal(ok, true, '删除应成功');
+  assert(deletedIds.includes('ses-fork-z'), '应实际 DELETE 目标会话');
+  assert(receivedPaths.some(u => u === '/session/ses-fork-z'), '应命中会话删除端点');
+  console.log('   ✅ fork 副本删除彻底');
+} finally {
+  await stopMockServer();
+}
+
+console.log('14. status 不含副本时，靠 assistant 消息完成度判定抽取结束...');
+const p9 = await startMockServer();
+try {
+  const baseUrl = `http://127.0.0.1:${p9}`;
+  // 模拟该宿主 /session/status 不跟踪 fork 副本：status 始终为空 map
+  mockStatusMap = {};
+  // 初始：最后一条 assistant 只有部分 parts、未 completed（推理中）
+  mockMessages = [
+    { info: { role: 'user' }, parts: [{ type: 'text', text: '复盘' }] },
+    { info: { role: 'assistant', time: { created: Date.now() } }, parts: [] }
+  ];
+  const prog1 = await getLastAssistantProgress(baseUrl, 'ses-fork-m');
+  assert.equal(prog1.hasReply, true, '应识别到最后一条 assistant 消息');
+  assert.equal(prog1.completed, false, '无 time.completed 应视为未完成');
+
+  // 600ms 后置为已完成
+  setTimeout(() => {
+    mockMessages = [
+      { info: { role: 'user' }, parts: [{ type: 'text', text: '复盘' }] },
+      { info: { role: 'assistant', time: { created: Date.now(), completed: Date.now() } }, parts: [{ type: 'text', text: '已完成沉淀' }] }
+    ];
+  }, 600);
+
+  const waited = await waitForSessionIdle(baseUrl, 'ses-fork-m', { pollIntervalMs: 200, maxWaitMs: 5000 });
+  assert.equal(waited.completed, true, `status 不含副本时应靠消息完成度收敛，实际 finalStatus=${waited.finalStatus}`);
+  console.log(`   ✅ 无 status 也能靠 assistant 完成度收敛 (${waited.finalStatus}, ${waited.waitedMs}ms)`);
+} finally {
+  await stopMockServer();
+}
+
+console.log('\n🎉 OpenCode 宿主驱动客户端 14 项断言全部通过！');

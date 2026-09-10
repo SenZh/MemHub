@@ -7,9 +7,13 @@ import { getDatabase } from './storage.js';
 import { 
   discoverOpenCodeServer, 
   listCandidateSessions, 
-  dispatchExtractionPrompt 
+  dispatchExtractionPrompt,
+  forkSession,
+  waitForSessionIdle,
+  deleteSession
 } from './host/opencode-client.js';
 import { runDreamPipeline } from './dream/pipeline.js';
+import { compileCron } from './cron.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -185,6 +189,35 @@ export function startDaemonBackground(cliOptions = {}) {
 }
 
 /**
+ * 在 (from, to] 时间区间内查找是否跨过任一 cron 命中分钟。
+ *
+ * 背景：daemon 轮询粒度通常为分钟级以上（如 60 分钟一轮），若只判断"当前这一分钟
+ * 是否命中 cron"，相位错位会导致 `0 3 * * *` 这类精确时刻永远命中不到。故需检测
+ * 本轮 tick 与上一轮之间是否跨过命中点。遍历步长为 1 分钟，并对区间长度做上限保护。
+ *
+ * @param {{match:(d:Date)=>boolean}} matcher 已编译的 cron 匹配器
+ * @param {number} fromTs 区间起点（不含），毫秒
+ * @param {number} toTs 区间终点（含），毫秒
+ * @returns {Date|null} 命中的时刻，无则 null
+ */
+export function findCronHitBetween(matcher, fromTs, toTs) {
+  if (!matcher || !(toTs > fromTs)) return null;
+
+  // 对齐到下一整分钟
+  const start = Math.floor(fromTs / 60000) * 60000 + 60000;
+  // 区间上限保护：最多向前回溯 7 天，防止极端情况下长时间未 tick 造成超大循环
+  const MAX_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+  const lowerBound = Math.max(start, toTs - MAX_LOOKBACK_MS);
+  const end = Math.floor(toTs / 60000) * 60000;
+
+  for (let ts = lowerBound; ts <= end; ts += 60000) {
+    const d = new Date(ts);
+    if (matcher.match(d)) return d;
+  }
+  return null;
+}
+
+/**
  * 守护进程前台执行核心循环 (Foreground Engine)
  */
 export function runDaemonForeground(cliOptions = {}) {
@@ -204,11 +237,15 @@ export function runDaemonForeground(cliOptions = {}) {
   console.log(`   - 扫描窗口: 最近 ${windowDays} 天内更新`);
   console.log(`   - 静默阈值: 距现在超过 ${idleMinutes} 分钟`);
   console.log(`   - 单轮上限: 最多处理 ${limit} 个会话`);
-  console.log(`   - 驱动模式: OpenCode HTTP 宿主驱动 (不 fork, 原地 LLM 复盘)`);
+  console.log(`   - 驱动模式: OpenCode HTTP 宿主驱动 (fork 副本抽取, 原会话零污染, 抽完即删)`);
   if (dryRun) console.log(`   - [注意] 当前处于 dry-run 桩模式，不真发 POST 请求`);
 
   const db = getDatabase();
   let running = false;
+
+  // 做梦调度状态：当日去重 + cron 编译缓存（避免每轮重复解析）
+  let lastDreamDate = null;   // 形如 '2026-09-10'，记录最近一次做梦触发的本地日期
+  let dreamCronCache = { expr: null, matcher: null, lastRunTs: Date.now() };
 
   // 获取已处理过的 session_id 集合
   function getProcessedSessionIds() {
@@ -220,6 +257,84 @@ export function runDaemonForeground(cliOptions = {}) {
     return new Set(rows.map(r => r.session_id));
   }
 
+  /**
+   * 做梦自省调度：读取配置 cron，本区间跨过命中时刻且当日未跑过则执行。
+   * 规则：
+   *   1. dream.enabled 为假 -> 跳过；
+   *   2. 配置了合法 cron -> 检测 (上次 tick, 现在] 是否跨过命中分钟（兼容轮询相位错位），当日仅触发一次；
+   *   3. cron 缺失/非法 -> 回退按 intervalMinutes 间隔触发（兜底）。
+   * 每轮 tick 调用，配置热重载即改即生效。
+   */
+  async function maybeRunDream(liveCfg) {
+    const dream = liveCfg?.dream;
+    if (!dream || dream.enabled !== true) return;
+
+    const now = new Date();
+    const dateKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+
+    // 当日已触发过则跳过
+    if (lastDreamDate === dateKey) return;
+
+    let shouldRun = false;
+    let reason = '';
+
+    const cronExpr = typeof dream.cron === 'string' ? dream.cron.trim() : '';
+    let cronValid = false;
+    if (cronExpr) {
+      try {
+        if (dreamCronCache.expr !== cronExpr) {
+          dreamCronCache.expr = cronExpr;
+          dreamCronCache.matcher = compileCron(cronExpr);
+        }
+        cronValid = true;
+      } catch (ce) {
+        console.warn(`   ⚠️ dream.cron 表达式非法（${ce.message}），回退按间隔调度`);
+        dreamCronCache.expr = cronExpr;
+        dreamCronCache.matcher = null;
+      }
+    }
+
+    // 1) cron 命中：因 daemon 轮询粒度 >= 1 分钟，不能只判断"当前这一分钟"，
+    //    而要检测 (上次检查, 现在] 区间内是否跨过了任一 cron 命中分钟，避免相位错位永远命中不到。
+    if (cronValid && dreamCronCache.matcher) {
+      const from = dreamCronCache.lastCheckTs || (Date.now() - intervalMinutes * 60 * 1000);
+      if (findCronHitBetween(dreamCronCache.matcher, from, Date.now())) {
+        shouldRun = true;
+        reason = `cron "${cronExpr}" 命中`;
+      }
+    }
+
+    // 2) 无有效 cron 时，按 intervalMinutes 间隔兜底
+    if (!shouldRun && !cronValid) {
+      const intervalMs = (dream.intervalMinutes || 1440) * 60 * 1000;
+      const lastRunTs = dreamCronCache.lastRunTs || Date.now();
+      if (Date.now() - lastRunTs >= intervalMs) {
+        shouldRun = true;
+        reason = `间隔调度（每 ${dream.intervalMinutes || 1440} 分钟）`;
+      }
+    }
+
+    dreamCronCache.lastCheckTs = Date.now();
+
+    if (!shouldRun) return;
+
+    console.log(`\n🌙 [memhub daemon] 触发做梦自省引擎（${reason}）...`);
+    try {
+      const dreamRes = await runDreamPipeline({ dryRun: false });
+      lastDreamDate = dateKey;
+      dreamCronCache.lastRunTs = Date.now();
+      if (dreamRes.processed > 0) {
+        console.log(`   ✅ 做梦成功派发 ${dreamRes.processed} 个碎片簇进行高阶熔炼`);
+      } else if (dreamRes.clusters_found === 0) {
+        console.log(`   ℹ️ 当前无可做梦的碎片簇，跳过本轮`);
+      } else {
+        console.log(`   ℹ️ 做梦本轮未派发（候选 ${dreamRes.total_candidates}，簇 ${dreamRes.clusters_found}）`);
+      }
+    } catch (de) {
+      console.warn(`   ⚠️ 做梦流水线异常: ${de.message}`);
+    }
+  }
+
   async function tick() {
     if (running) return; // 防止上一轮未跑完时重入
     running = true;
@@ -227,9 +342,16 @@ export function runDaemonForeground(cliOptions = {}) {
     console.log(`\n=== [${ts}] memhub daemon 触发一轮检查 ===`);
 
     try {
+      // 0. 每轮热重载配置：无需重启 daemon 即可让 config.json 的改动生效
+      const liveCfg = getConfig();
+      const liveDaemon = liveCfg.daemon || daemon;
+
+      // 0.1 做梦自省调度（独立于会话抽取，先于 OpenCode 探测，避免被提前 return 跳过）
+      await maybeRunDream(liveCfg);
+
       // 1. 动态发现 OpenCode Server
       const baseUrl = await discoverOpenCodeServer({
-        explicitBaseUrl: daemon.opencodeUrl || undefined,
+        explicitBaseUrl: liveDaemon.opencodeUrl || undefined,
         timeoutMs: 3000
       });
 
@@ -247,7 +369,7 @@ export function runDaemonForeground(cliOptions = {}) {
         idleMinutes,
         excludeIds,
         limit,
-        scanRules: cfg.scanRules
+        scanRules: liveCfg.scanRules
       });
 
       if (candidates.length === 0) {
@@ -290,27 +412,66 @@ export function runDaemonForeground(cliOptions = {}) {
           console.warn(`   ⚠️ session_tracking 记录失败: ${e.message}`);
         }
 
-        // 调用 OpenCode HTTP 发送抽取 Prompt
+        // 调用 OpenCode HTTP：fork 原会话 -> 在 fork 副本内抽取 -> 轮询完成 -> 删除 fork
+        // 关键约束：
+        //   1. 绝不向原会话写消息，原会话排序/缓存完全不受影响；
+        //   2. fork 会话必须无论成败都在 finally 中删除，避免用户可见与再次被扫描套娃；
+        //   3. 抽取结果归属原会话 (originSessionId)，写入 memhub_save 的 session_id。
+        let forkId = null;
         try {
+          if (dryRun) {
+            const res = await dispatchExtractionPrompt(baseUrl, {
+              sessionId: session.id,
+              originSessionId: session.id,
+              dryRun: true
+            });
+            console.log(`   [dry-run] 已生成沉淀指令桩（未 fork，未发送）`);
+            console.log(`   [dry-run] 目标原会话: ${res.url}`);
+            continue;
+          }
+
+          // 1. fork 原会话，复制上下文（保留前缀 prompt cache），不触碰原会话
+          const fork = await forkSession(baseUrl, session.id, { timeoutMs: 20000 });
+          forkId = fork?.id;
+          if (!forkId) throw new Error('fork 未返回有效会话 id');
+          console.log(`   🍴 已 fork 抽取副本: ${forkId} (目录: ${fork.directory || session.directory})`);
+
+          // 2. 向 fork 副本注入沉淀指令（结果归属原会话）
           const res = await dispatchExtractionPrompt(baseUrl, {
-            sessionId: session.id,
-            dryRun,
+            sessionId: forkId,
+            originSessionId: session.id,
+            dryRun: false,
             timeoutMs: 25000
           });
 
-          if (dryRun) {
-            console.log(`   [dry-run] 已生成沉淀指令桩（未发送）`);
-          } else if (res.posted) {
-            console.log(`   ✅ 已成功注入沉淀指令，宿主 LLM 正在会话内复盘提炼并调用 memhub_save`);
-            // 更新 tracking 状态为 EXTRACTED
-            db.prepare(`
-              UPDATE session_tracking 
-              SET status = 'EXTRACTED', updated_at = ? 
-              WHERE session_id = ?
-            `).run(Date.now(), session.id);
-          } else {
+          if (!res.posted) {
             console.warn(`   ⚠️ 注入指令返回异常 HTTP ${res.httpStatus}`);
+            throw new Error(`注入 fork 副本失败 HTTP ${res.httpStatus}`);
           }
+
+          // 3. 轮询等待 fork 副本抽取完成（idle）或超时
+          console.log(`   ⏳ 等待 fork 副本完成复盘提炼...`);
+          const waited = await waitForSessionIdle(baseUrl, forkId, {
+            pollIntervalMs: 3000,
+            maxWaitMs: 300000,
+            onWait: (st, ms) => {
+              if (ms > 0 && ms % 30000 < 3000) {
+                console.log(`      ...仍处理中 (状态: ${st}, 已等待 ${Math.round(ms / 1000)}s)`);
+              }
+            }
+          });
+          if (waited.completed) {
+            console.log(`   ✅ fork 副本复盘完成 (耗时 ${Math.round(waited.waitedMs / 1000)}s)，宿主 LLM 已调用 memhub_save`);
+          } else {
+            console.warn(`   ⚠️ fork 副本等待超时 (最终状态: ${waited.finalStatus})`);
+          }
+
+          // 更新 tracking 状态为 EXTRACTED
+          db.prepare(`
+            UPDATE session_tracking 
+            SET status = 'EXTRACTED', updated_at = ? 
+            WHERE session_id = ?
+          `).run(Date.now(), session.id);
         } catch (e) {
           console.error(`   ❌ 驱动抽取失败: ${e.message}`);
           db.prepare(`
@@ -318,6 +479,12 @@ export function runDaemonForeground(cliOptions = {}) {
             SET status = 'FAILED', updated_at = ? 
             WHERE session_id = ?
           `).run(Date.now(), session.id);
+        } finally {
+          // 无论成败，必须清理 fork 副本，防止残留可见与循环抽取
+          if (forkId) {
+            const ok = await deleteSession(baseUrl, forkId).catch(() => false);
+            console.log(ok ? `   🧹 已清理 fork 副本 ${forkId}` : `   ⚠️ fork 副本 ${forkId} 清理失败，请手动删除`);
+          }
         }
 
         // 会话间平滑冷却间隔，防止并发打爆宿主推理与 WebSocket
@@ -327,23 +494,6 @@ export function runDaemonForeground(cliOptions = {}) {
       }
 
       console.log(`✨ 本轮会话处理完毕。`);
-
-      // 4. 夜间做梦自省检查 (若处于凌晨时段 02:00~05:00 或启用了 dream)
-      if (config.dream?.enabled) {
-        const currentHour = new Date().getHours();
-        // 如果是凌晨时段 (2点到5点) 自动触发做梦熔炼
-        if (currentHour >= 2 && currentHour <= 5) {
-          console.log(`\n🌙 [memhub daemon] 检测到当前处于夜间深度睡眠窗口 (${currentHour}:00)，启动做梦自省引擎...`);
-          try {
-            const dreamRes = await runDreamPipeline({ dryRun: false });
-            if (dreamRes.processed > 0) {
-              console.log(`   ✅ 昨夜做梦成功派发 ${dreamRes.processed} 个碎片簇进行高阶熔炼`);
-            }
-          } catch (de) {
-            console.warn(`   ⚠️ 做梦流水线异常: ${de.message}`);
-          }
-        }
-      }
     } catch (err) {
       console.error(`[memhub daemon] 本轮调度异常: ${err.message}`);
     } finally {

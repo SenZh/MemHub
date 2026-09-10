@@ -21,9 +21,10 @@
 - 🧠 **借宿主算力提炼（零 API Key 依赖）**：利用原会话自身上下文与模型参数执行知识抽取，吃 Prompt Cache 近乎零额外费用。
 - 🕒 **后台常驻记忆提炼守护 (`memhub daemon`)**：
   - 常驻进程 `setInterval` 自循环，支持优雅退出信号（SIGINT/SIGTERM）；
-  - **统一会话筛选与 Subagent 拦截**：统一基于 `isSubagentSession` 排除所有 `parentID` 存在、子智能体角色（`review`/`explore` 等）与派生子会话，仅聚焦主任务，直接节省 60% 无效推理算力；
-  - **宿主 HTTP 驱动（不 fork，原地复盘）**：动态扫描端口与鉴权，直连运行中的 OpenCode HTTP 服务向目标会话注入深度复盘指令；
+  - **统一会话筛选与 Subagent 拦截**：统一基于 `isSubagentSession` 排除所有 `parentID` 存在、子智能体角色（`review`/`explore` 等）、派生子会话与抽取 fork 副本，仅聚焦主任务，直接节省 60% 无效推理算力；
+  - **fork 副本抽取（原会话零污染）**：动态扫描端口与鉴权直连 OpenCode HTTP 服务，先 `POST /session/:id/fork` 复制原会话上下文（继承前缀 Prompt Cache），再向副本注入复盘指令；全程不写原会话，**会话排序与缓存完全不受影响**，无论成败均在 `finally` 中删除副本，配合 `(fork #N)` 标题特征拦截彻底杜绝套娃循环；
   - **双重时间窗口与防重**：只扫描最近 7 天内更新（`windowDays: 7`）且距现在超过 120 分钟静默稳定（`idleMinutes: 120`）的冷态会话，本地 SQLite `session_tracking` 表权威防重；
+  - **配置热重载**：daemon 每轮 tick 重新读取 `config.json`，修改配置无需重启进程即可生效；
   - **无价值坚决不沉淀**：严格门禁，日常闲聊、简单查文件或未验证成果直接回复“无需沉淀”，禁止写入数据库；
   - **彻底废除离线死模板假抽取**：纯离线不凭空捏造假卡，只允许真实 LLM 提炼。
 - 🔄 **存储层 Upsert 原地覆盖与同会话多卡沉淀**：
@@ -46,7 +47,7 @@
   - 支持 `(project = ? OR project = 'global')` 物理隔离无关项目，同时穿透全局通用经验；
   - 基于 SQLite 原生 `json_each` 实现标签多值交集（AND）参数化精准收窄。
 - 🌙 **AI 做梦与记忆熔炼自省引擎 (`memhub dream`)**：
-  - **离线睡眠反思**：每天凌晨定时或通过极简 Cron 自动触发，将 SQLite 中零散的单点排错/决策卡进行跨会话交叉比对；
+  - **离线睡眠反思**：由标准 5 段 Cron 表达式精确调度（默认每天凌晨 `0 3 * * *`），自动触发碎片交叉比对；内置**区间命中检测**，即使 daemon 轮询相位与整点错开也能可靠命中目标时刻；
   - **三维亲和度聚类**：融合 Tag Jaccard + File Overlap + 384 维向量余弦相似度，利用连通子图精准切分出 2~5 张卡片的高凝聚力做梦主题簇；
   - **架构师级提炼 Prompt**：指导宿主 LLM 抽象出通用因果律、识别设计冲突（Contradiction Radar），升华出工业级 L4 认知设计规约；
   - **状态机闭环与溯源防重**：落盘 L4 规约卡（`is_synthesized = 1`），原碎片卡自动原子标记为 `status = 'consolidated'` 封存归档，永久退出做梦候选池，杜绝套娃；同时写入 `knowledge_dream_history` 审计表，30 天内相同卡片组合绝对幂等拦截。
@@ -56,7 +57,8 @@
   - **端到端调用审计日志 (`mcp_audit_logs`)**：自动捕获工具调用流水、查询关键词、命中条数与毫秒级耗时，非阻塞无感落盘。
 - 📊 **按 Project 项目维度分类大盘与效能度量 (`memhub stats`)**：
   - 多维透视全局资产与四大分类分布；
-  - 自动按 Project 汇总排错、决策、模式与业务资产对比，量化估算规避试错节省的 Token 价值。
+  - 自动按 Project 汇总排错、决策、模式与业务资产对比，量化估算规避试错节省的 Token 价值；
+  - **做梦引擎成效透视**：独立统计 L4 升华卡片数、已封存碎片数、做梦熔炼轮次、待做梦候选池与失败冷却数。
 - 🛡️ **物理终态成功证据门禁 (Truth Verification Gate)**：
   - 提炼引擎前置检验退出码 0、测试通过或服务就绪证据，严禁记录未经验证的猜测。
 - 🔒 **敏感凭据深度递归脱敏 (Secret Scrubbing)**：
@@ -74,8 +76,8 @@
    MCP 协议接口 (memhub-mcp)                               memhub daemon (常驻自循环)
    • memhub_search (L1 索引 ~50 tokens)                    • 动态发现 OpenCode HTTP 端口与鉴权
    • memhub_get (L2/L3 按需展开正文与代码)                  • 扫描最近 7 天更新 & 静默 >120 分钟冷态会话
-   • memhub_save (主动结构化落盘 / 原地 Upsert)             • POST /session/:id/prompt_async 驱动宿主 LLM
-   • memhub_recent (新会话破冰与历史轨迹速览)               • 无价值坚决不沉淀，同会话多卡拆分
+   • memhub_save (主动结构化落盘 / 原地 Upsert)             • fork 副本抽取 → POST prompt_async → 抽完即删
+   • memhub_recent (新会话破冰与历史轨迹速览)               • 每轮热重载配置 + Cron 做梦调度
          │                                                         │
          └────────────────────────────┬────────────────────────────┘
                                       ▼
@@ -232,7 +234,7 @@ MemHub 遵循“渐进式披露 (Progressive Disclosure)”与“自解释认知
 ```
 
 - **`daemon`**：常驻定时提炼参数块，支持环境变量覆盖（`MEMHUB_DAEMON_INTERVAL`, `MEMHUB_DAEMON_WINDOW_DAYS`, `MEMHUB_DAEMON_IDLE_MINUTES`, `MEMHUB_OPENCODE_URL`）；
-- **`dream`**：夜间做梦自省参数块，支持极简 Cron 定时（默认每天凌晨 3 点）、亲和度初筛阈值与单簇卡片上限，支持环境变量覆盖（`MEMHUB_DREAM_ENABLED`, `MEMHUB_DREAM_CRON`, `MEMHUB_DREAM_AFFINITY`）；
+- **`dream`**：夜间做梦自省参数块，`cron` 为标准 5 段式表达式（默认每天凌晨 3 点 `0 3 * * *`，真正生效并支持区间命中），另含亲和度初筛阈值与单簇卡片上限；无有效 cron 时回退 `intervalMinutes` 间隔兜底。支持环境变量覆盖（`MEMHUB_DREAM_ENABLED`, `MEMHUB_DREAM_CRON`, `MEMHUB_DREAM_AFFINITY`, `MEMHUB_DREAM_INTERVAL`）；
 - **`idleMinutes`**：判定会话进入已结束完成态的静默分钟数（默认 120，支持环境变量 `MEMHUB_IDLE_MINUTES` 覆盖）；
 - **`watchDirectories`**：限制扫描的物理根目录数组（默认空表示全库扫描）；
 - **`exclude`**：黑名单通配符规则，**最高优先级**，命中立即跳过；
@@ -242,11 +244,11 @@ MemHub 遵循“渐进式披露 (Progressive Disclosure)”与“自解释认知
 
 ## 🧪 测试与质量保障
 
-MemHub 拥有完整的分层自动化测试矩阵（涵盖 CLI 契约、路径过滤引擎、动态配置防腐、分层存储内核、混合向量 RRF 检索、适配器动态过滤、管道提炼、Stdio MCP 渐进披露、宿主客户端探测、按 Project 态势大盘、MCP 调用审计、做梦亲和度聚类及做梦调度管道）：
+MemHub 拥有完整的分层自动化测试矩阵（涵盖 CLI 契约、路径过滤引擎、动态配置防腐、分层存储内核、混合向量 RRF 检索、适配器动态过滤、管道提炼、Stdio MCP 渐进披露、宿主客户端探测与 fork 抽取、按 Project 态势大盘、MCP 调用审计、做梦亲和度聚类、做梦调度管道及 Cron 定时引擎）：
 
 ```bash
 npm test
-# 12 大测试套件 100% 自动化全绿灯通过
+# 13 大测试套件 100% 自动化全绿灯通过
 ```
 
 ---

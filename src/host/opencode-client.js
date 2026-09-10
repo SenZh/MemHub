@@ -268,6 +268,12 @@ export function isSubagentSession(session) {
     return true;
   }
 
+  // 4. 记忆抽取 fork 会话拦截：daemon 派发的 fork 会继承原目录且无 parentID，
+  //    仅靠 parentID 无法识别，必须用标题后缀 "(fork #N)" 特征拦截，杜绝套娃循环抽取。
+  if (/\(fork #\d+\)$/i.test(title)) {
+    return true;
+  }
+
   return false;
 }
 
@@ -402,9 +408,197 @@ export function buildExtractionPrompt(opts = {}) {
 }
 
 /**
+ * 在指定目录下发起 fork，复制原会话上下文用于离线抽取。
+ *
+ * 说明：OpenCode 的 /session/:id/fork 会复制原会话历史（保留前缀 prompt cache），
+ * 但其 directory 始终继承原会话，无法重定向到别的目录（API 限制）。fork 出的
+ * 会话无 parentID，只能靠标题后缀 "(fork #N)" 识别，故需配合 isSubagentSession 拦截。
+ *
+ * @param {string} baseUrl
+ * @param {string} sessionId 原会话 id
+ * @param {Object} opts { messageID?, timeoutMs? }
+ * @returns {Promise<Object>} fork 出的新会话对象（含 id/directory/title）
+ */
+export async function forkSession(baseUrl, sessionId, opts = {}) {
+  if (!sessionId) throw new Error('forkSession: 缺少必须的 sessionId');
+  const auth = basicAuthHeader();
+  const headers = { 'content-type': 'application/json' };
+  if (auth) headers.Authorization = auth;
+
+  const body = {};
+  if (opts.messageID) body.messageID = opts.messageID;
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), opts.timeoutMs || 20000);
+  try {
+    const res = await fetch(`${baseUrl}/session/${encodeURIComponent(sessionId)}/fork`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+    if (!res.ok) throw new Error(`fork 会话失败 HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * 读取单个会话的运行态（idle / busy / retry）。
+ * @returns {Promise<string>} 'idle' | 'busy' | 'retry' | 'unknown'
+ */
+export async function getSessionStatus(baseUrl, sessionId, timeoutMs = 8000) {
+  const auth = basicAuthHeader();
+  const headers = {};
+  if (auth) headers.Authorization = auth;
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${baseUrl}/session/status`, { headers, signal: ctrl.signal });
+    clearTimeout(t);
+    if (!res.ok) throw new Error(`读取会话状态失败 HTTP ${res.status}`);
+    const map = await res.json();
+    const st = map?.[sessionId];
+    if (!st) return 'unknown';
+    return st.type || 'unknown';
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * 读取会话最后一次 assistant 回复的完成度。
+ *
+ * 背景：/session/status 并不总是包含 fork 副本（部分宿主实现只跟踪 TUI 侧会话），
+ * 因此不能仅靠 status 判定抽取是否结束。更可靠的信号是最后一条 assistant 消息：
+ *   - 仍在推理：parts 为空 / 无 time.completed
+ *   - 已完成：存在 time.completed，或 parts 非空且不再增长
+ *
+ * @returns {Promise<{hasReply:boolean, completed:boolean, partsCount:number}>}
+ */
+export async function getLastAssistantProgress(baseUrl, sessionId, timeoutMs = 8000) {
+  const auth = basicAuthHeader();
+  const headers = {};
+  if (auth) headers.Authorization = auth;
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${baseUrl}/session/${encodeURIComponent(sessionId)}/message`, {
+      headers, signal: ctrl.signal
+    });
+    clearTimeout(t);
+    if (!res.ok) throw new Error(`读取会话消息失败 HTTP ${res.status}`);
+    const arr = await res.json();
+    const list = Array.isArray(arr) ? arr : [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const info = list[i]?.info;
+      if (info?.role === 'assistant') {
+        const parts = Array.isArray(list[i]?.parts) ? list[i].parts : [];
+        const completed = !!info.time?.completed;
+        return { hasReply: true, completed, partsCount: parts.length };
+      }
+    }
+    return { hasReply: false, completed: false, partsCount: 0 };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * 轮询等待 fork 会话抽取完成。
+ * prompt_async 为"发完即返回"，需主动轮询直到目标会话产出完成回复或超时。
+ * 判定策略（双保险）：
+ *   1. status 变为 idle —— 若宿主维护了该副本状态，最快信号；
+ *   2. 最后一条 assistant 消息出现 time.completed 且 parts 非空 —— 通用可靠信号。
+ * @param {Object} opts { pollIntervalMs=3000, maxWaitMs=300000, onWait? }
+ * @returns {Promise<{completed:boolean, waitedMs:number, finalStatus:string}>}
+ */
+export async function waitForSessionIdle(baseUrl, sessionId, opts = {}) {
+  const pollIntervalMs = opts.pollIntervalMs || 3000;
+  const maxWaitMs = opts.maxWaitMs || 300000;
+  const start = Date.now();
+  let lastStatus = 'unknown';
+  let sawReply = false;
+
+  while (Date.now() - start < maxWaitMs) {
+    await new Promise(r => setTimeout(r, pollIntervalMs));
+    const waitedMs = Date.now() - start;
+
+    // 信号 1：宿主状态 idle
+    let status = 'unknown';
+    try {
+      status = await getSessionStatus(baseUrl, sessionId);
+    } catch {
+      status = 'unknown';
+    }
+    lastStatus = status;
+    if (status === 'idle') {
+      return { completed: true, waitedMs, finalStatus: 'idle' };
+    }
+
+    // 信号 2：最后一条 assistant 消息已完成
+    try {
+      const prog = await getLastAssistantProgress(baseUrl, sessionId);
+      if (prog.completed && prog.partsCount > 0) {
+        // 二次确认：间隔一个周期后仍未变化，避免"part 刚写入"的中间态误判
+        await new Promise(r => setTimeout(r, Math.min(pollIntervalMs, 1500)));
+        const confirm = await getLastAssistantProgress(baseUrl, sessionId);
+        if (confirm.completed && confirm.partsCount > 0) {
+          return { completed: true, waitedMs: Date.now() - start, finalStatus: 'completed' };
+        }
+      }
+      if (prog.hasReply) sawReply = true;
+    } catch {
+      // 消息读取失败不致命，继续等待
+    }
+
+    if (typeof opts.onWait === 'function') {
+      try { opts.onWait(status, waitedMs); } catch {}
+    }
+  }
+
+  // 超时兜底：若期间至少出现过 assistant 回复且已无新增迹象，视为大概完成
+  return { completed: false, waitedMs: Date.now() - start, finalStatus: lastStatus, sawReply };
+}
+
+/**
+ * 删除会话（fork 抽取完成后必须调用，避免用户在会话列表中看到残留与再次被扫描）。
+ * @returns {Promise<boolean>}
+ */
+export async function deleteSession(baseUrl, sessionId, timeoutMs = 8000) {
+  if (!sessionId) return false;
+  const auth = basicAuthHeader();
+  const headers = {};
+  if (auth) headers.Authorization = auth;
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${baseUrl}/session/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+      headers,
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
  * 将沉淀指令注入目标会话，驱动宿主 LLM 执行抽取。
  * @param {string} baseUrl
- * @param {Object} opts { sessionId, dryRun, timeoutMs }
+ * @param {Object} opts { sessionId, originSessionId?, dryRun, timeoutMs }
+ *   - sessionId: 实际接收 prompt 的会话（fork 场景下为 fork 出的副本）
+ *   - originSessionId: 抽取结果归属的原会话 id，写入 memhub_save 的 session_id；
+ *     缺省时回退为 sessionId（不 fork 的向后兼容场景）
  * @returns {Promise<{dryRun:boolean,url:string,prompt:string,posted?:boolean,httpStatus?:number}>}
  */
 export async function dispatchExtractionPrompt(baseUrl, opts = {}) {
@@ -412,7 +606,7 @@ export async function dispatchExtractionPrompt(baseUrl, opts = {}) {
   if (!sessionId) throw new Error('dispatchExtractionPrompt: 缺少必须的 sessionId');
   const dryRun = opts.dryRun === true;
   const prompt = buildExtractionPrompt({ 
-    targetSessionId: sessionId,
+    targetSessionId: opts.originSessionId || sessionId,
     projectName: opts.projectName
   });
 

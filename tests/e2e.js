@@ -29,7 +29,8 @@ const suites = [
   { name: '宿主驱动客户端与多策略动态端口探测', cmd: 'node tests/test-host-client.js' },
   { name: '研发态势大盘与代码热点度量 (memhub stats)', cmd: 'node tests/test-stats.js' },
   { name: 'AI 做梦引擎碎片聚类与防重 (memhub dream)', cmd: 'node tests/test-dream-cluster.js' },
-  { name: 'AI 做梦执行调度管道与状态机流转 (Dream Pipeline)', cmd: 'node tests/test-dream-pipeline.js' }
+  { name: 'AI 做梦执行调度管道与状态机流转 (Dream Pipeline)', cmd: 'node tests/test-dream-pipeline.js' },
+  { name: 'Cron 定时表达式解析与匹配引擎 (dream cron 调度)', cmd: 'node tests/test-cron.js' }
 ];
 
 try {
@@ -60,7 +61,7 @@ try {
   }
 
   console.log('====================================================');
-  console.log('🎉 12 大测试套件全部 100% 成功通过！');
+  console.log('🎉 13 大测试套件全部 100% 成功通过！');
   console.log('====================================================');
 } finally {
   // 清理临时测试沙箱

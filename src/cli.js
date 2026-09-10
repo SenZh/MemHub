@@ -281,6 +281,20 @@ switch (command) {
       });
     }
 
+    console.log(`\n【🌙 做梦引擎自省与认知熔炼】:`);
+    const dr = stats.dreaming || {};
+    if (!dr.synthesized_l4 && !dr.consolidated_fragments && !dr.dream_rounds) {
+      console.log(`  (暂未发生做梦自省熔炼)`);
+    } else {
+      console.log(`  • L4 升华卡片    : ${dr.synthesized_l4 || 0} 篇 (由碎片自动熔炼生成)`);
+      console.log(`  • 已封存碎片    : ${dr.consolidated_fragments || 0} 篇 (被熔炼退出常规池)`);
+      console.log(`  • 做梦熔炼轮次  : ${dr.dream_rounds || 0} 轮 (台账 knowledge_dream_history)`);
+      console.log(`  • 待做梦候选池  : ${dr.candidate_pool || 0} 篇 (active 且过冷却期)`);
+      if (dr.cooling_down) {
+        console.log(`  • 失败冷却中    : ${dr.cooling_down} 篇 (暂缓重试)`);
+      }
+    }
+
     console.log(`\n【⚡ MCP 工具调用频次与响应】:`);
     if (!stats.mcp_tool_calls || stats.mcp_tool_calls.length === 0) {
       console.log(`  (暂无 MCP 调用审计记录)`);
