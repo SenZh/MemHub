@@ -7,9 +7,10 @@ import {
   getDatabase, 
   backupDatabase, 
   exportToMarkdown, 
-  getStats,
-  syncEmbeddings,
-  getMcpAuditLogs
+  getStats, 
+  syncEmbeddings, 
+  getMcpAuditLogs,
+  deleteKnowledge
 } from './storage.js';
 import { 
   getDreamCandidateItems, 
@@ -23,6 +24,7 @@ import {
   getDaemonStatus, 
   showDaemonLogs 
 } from './daemon.js';
+import { startWebServer } from './server/index.js';
 import { MEMHUB_HOME, VAULT_DIR, BACKUP_DIR, DB_PATH } from './config.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,6 +41,7 @@ MemHub (memhub / mem-hub) CLI - AI 编程知识中枢与工程长效记忆
   memhub daemon [start|stop|status|logs]  后台常驻定时提炼守护服务 (默认后台运行)
   memhub search / find <词>    全文/混合检索历史避坑经验与决策 (支持 --project, --category, --tag)
   memhub get <id>              查看某张知识卡片的完整详细内容与代码正文
+  memhub delete / rm <id>      物理删除指定的知识卡片与索引 (支持 -y/--yes)
   memhub list [选项]           查看最近沉淀的知识列表 (支持 --limit, --project, --category, --tag)
   memhub stats [选项]          查看全局/项目研发态势与项目维度分类大盘 (支持 --json, --project)
   memhub audit [条数]          查看 MCP 工具调用审计流水 (支持 --tool <name>, --json)
@@ -46,6 +49,7 @@ MemHub (memhub / mem-hub) CLI - AI 编程知识中枢与工程长效记忆
   memhub backup [路径]         执行 SQLite 原生 VACUUM INTO 无损原子热备份
   memhub export [目录]         将 SQLite 数据库无损导出为结构化 Markdown 目录树 (Obsidian兼容)
   memhub embed                 全量/增量为已有知识计算 384 维语义向量并持久化
+  memhub ui / web [选项]       启动内置 HTTP 服务并打开 WebUI 可视化外脑看板
   memhub path                  打印知识库物理路径与数据库位置
 
 daemon 守护指令:
@@ -64,6 +68,13 @@ daemon 可选参数:
   --once              只执行一轮后退出
   --dry-run           测试桩模式 (不真发 HTTP POST)
   --force             强制重新处理已跳过的会话
+  --ui                伴生启动 WebUI 看板服务 (默认端口 3900)
+  --ui-port <端口>    指定 WebUI 伴生服务端口 (默认 3900)
+
+ui / web 可选参数:
+  --port <端口>       HTTP 服务监听端口 (默认 3900)
+  --host <主机>       HTTP 服务监听主机 (默认 127.0.0.1)
+  --no-open           启动后不自动唤起默认浏览器
 `);
 }
 
@@ -112,6 +123,8 @@ switch (command) {
       else if (a === '--once') cliOpts.once = true;
       else if (a === '--dry-run') cliOpts.dryRun = true;
       else if (a === '--force') cliOpts.force = true;
+      else if (a === '--ui') cliOpts.ui = true;
+      else if (a === '--ui-port' && rest[i + 1]) cliOpts.uiPort = parseInt(rest[++i], 10) || undefined;
     }
 
     runDaemon(cliOpts);
@@ -179,6 +192,63 @@ switch (command) {
       console.log(`未找到 ID 为 "${id}" 的卡片。`);
     } else {
       console.log('\n' + card.content + '\n');
+    }
+    break;
+  }
+
+  case 'delete':
+  case 'rm': {
+    const rawArgs = args.slice(1);
+    let targetId = null;
+    let autoYes = false;
+
+    for (const a of rawArgs) {
+      if (a === '--yes' || a === '-y' || a === '--force') {
+        autoYes = true;
+      } else if (!a.startsWith('-') && !targetId) {
+        targetId = a;
+      }
+    }
+
+    if (!targetId) {
+      console.log('用法: memhub delete <id> [--yes/-y]');
+      process.exit(1);
+    }
+
+    const doDelete = () => {
+      try {
+        const res = deleteKnowledge(targetId);
+        if (res.notFound) {
+          console.error(`❌ ${res.message}`);
+          process.exit(1);
+        }
+        console.log(`✅ ${res.message}`);
+        console.log(`   • 标题: ${res.title}`);
+        process.exit(0);
+      } catch (err) {
+        console.error(`❌ 删除失败: ${err.message}`);
+        process.exit(1);
+      }
+    };
+
+    if (autoYes) {
+      doDelete();
+    } else {
+      import('node:readline').then(readline => {
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
+        rl.question(`⚠️ 确认要彻底物理删除知识卡片 [${targetId}] 吗？(y/N): `, answer => {
+          rl.close();
+          if (answer.trim().toLowerCase() === 'y' || answer.trim().toLowerCase() === 'yes') {
+            doDelete();
+          } else {
+            console.log('ℹ️ 已取消删除操作。');
+            process.exit(0);
+          }
+        });
+      });
     }
     break;
   }
@@ -469,6 +539,38 @@ switch (command) {
     console.log(`  • SQLite库: ${DB_PATH}`);
     console.log(`  • Vault导出: ${VAULT_DIR}`);
     console.log(`  • 归档目录: ${BACKUP_DIR}\n`);
+    break;
+  }
+
+  case 'ui':
+  case 'web':
+  case 'server': {
+    let port = 3900;
+    let host = '127.0.0.1';
+    let autoOpen = true;
+
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--port' && args[i + 1]) {
+        port = parseInt(args[++i], 10) || 3900;
+      } else if (args[i] === '--host' && args[i + 1]) {
+        host = args[++i];
+      } else if (args[i] === '--no-open') {
+        autoOpen = false;
+      }
+    }
+
+    try {
+      const { server } = await startWebServer({ port, host, open: autoOpen });
+
+      const stopServer = () => {
+        console.log('\n[memhub ui] 收到退出信号，正在关闭 Web 服务...');
+        server.close(() => process.exit(0));
+      };
+      process.on('SIGINT', stopServer);
+      process.on('SIGTERM', stopServer);
+    } catch (e) {
+      process.exit(1);
+    }
     break;
   }
 

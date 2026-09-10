@@ -1,6 +1,6 @@
 # MemHub 目标差距分析与工程演进计划书 (Roadmap & Progress)
 
-> **版本定位**：v0.1.3 会话零污染抽取、配置热重载与 Cron 做梦调度增强版（Isolated Extraction & Scheduling Release）  
+> **版本定位**：v0.1.5 手动删除记忆与三表级联原子清理发布版 (Manual Deletion & Cascade Atomic Purge Release)  
 > **项目定位**：面向 AI Coding Agent 的工程长效记忆与暗知识调度中枢（Unified Memory & Knowledge Hub）  
 > **更新基准**：2026-09-10
 
@@ -27,7 +27,9 @@
 | **13. 项目命名空间防腐与治理 (P0)** | 根治多系统别名（如 `omsdubhe` / `OMS-Dubhe`）裂变，统一收敛为权威项目名 | 已完整实现（存量数据清洗归一、`normalizeProjectName` 写入防腐、Prompt 强约束注入） | **100%** |
 | **14. 动态知识地图注入 (P2)** | `memhub map` 自动生成当前项目 `<500 tokens` 的 `AGENTS.md` 知识地图节 | 评估识别痛点（开局任务未知），调整优先级至 v0.2.x 探索 | **0%** |
 | **15. Cursor 深度穿透 (P2)** | 穿透 `%APPDATA%/Cursor/.../state.vscdb` 读取 `composerData` 时序流 | 接口骨架与插槽已就绪（`src/adapters/cursor.js`），底层解析逻辑暂未填入（按既定策略延后） | **20%** |
-| **16. 会话零污染抽取与 Cron 调度增强 (P0)** | fork 副本抽取避免污染原会话排序/缓存；daemon 配置热重载；dream cron 真正按表达式触发 | 已完整实现：`fork`→抽取→轮询完成→`finally` 删除的闭环 + `(fork #N)` 防套娃拦截 + 每轮热重载 + 标准 5 段式 Cron 引擎与区间命中检测，实测与 13 套件单测全绿 | **100%** |
+| **16. 会话零污染抽取与 Cron 调度增强 (P0)** | fork 副本抽取避免污染原会话排序/缓存；daemon 配置热重载；dream cron 真正按表达式触发 | 已完整实现：`fork`→抽取→轮询完成→`finally` 删除的闭环 + `(fork #N)` 防套娃拦截 + 每轮热重载 + 标准 5 段式 Cron 引擎与区间命中检测，实测与 15 套件单测全绿 | **100%** |
+| **17. 轻量 WebUI 看板与内置 HTTP 服务 (P0)** | 0 外部重型依赖原生 HTTP 服务 + 单文件 SPA 看板（态势大盘、知识全景两阶段展开、混合检索实验室、MCP 审计流水、一键热备与导出）+ 安全沙箱与 CSRF 门禁 | 已完整实现（`src/server/index.js`, `src/server/public/index.html`, `tests/test-web-server.js`），支持 `memhub ui` 独立拉起与 `memhub daemon --ui` 伴生脱机隔离运行，15 套件全绿 | **100%** |
+| **18. 手动删除记忆与三表级联原子清理 (P0)** | 存储层原生 BEGIN IMMEDIATE 排他事务级联清理三表 + DELETE/POST 路由 CSRF 门禁 + WebUI 动态标题防误触二次确认与跨视图即时 DOM 移除 + CLI memhub delete/rm | 已完整实现（`src/storage.js`, `src/server/index.js`, `src/server/public/index.html`, `src/cli.js`, `tests/test-deletion.js`），实现 0 幽灵召回，15 套件全绿 | **100%** |
 
 ---
 

@@ -60,7 +60,7 @@ assert(searchRes1.length > 0);
 assert(searchRes1.some(r => r.id === recordRes.id));
 assert(typeof searchRes1[0].summary === 'string'); // 包含 L1 摘要
 
-const searchRes2 = searchKnowledge('缺失');
+const searchRes2 = searchKnowledge('缺失', { limit: 10 });
 console.log('搜索中文 "缺失" 结果条数:', searchRes2.length);
 assert(searchRes2.length > 0);
 assert(searchRes2.some(r => r.title.includes('缺失')));

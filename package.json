@@ -1,6 +1,6 @@
 {
   "name": "memhub",
-  "version": "0.1.2",
+  "version": "0.1.5",
   "type": "module",
   "description": "The unified knowledge & memory hub for AI coding agents",
   "bin": {
@@ -21,7 +21,9 @@
     "test:stats": "node tests/test-stats.js",
     "test:dream": "node tests/test-dream-cluster.js",
     "test:dream:pipeline": "node tests/test-dream-pipeline.js",
-    "test:cli": "node tests/test-cli.js"
+    "test:cli": "node tests/test-cli.js",
+    "test:web": "node tests/test-web-server.js",
+    "test:deletion": "node tests/test-deletion.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0"

@@ -30,7 +30,9 @@ const suites = [
   { name: '研发态势大盘与代码热点度量 (memhub stats)', cmd: 'node tests/test-stats.js' },
   { name: 'AI 做梦引擎碎片聚类与防重 (memhub dream)', cmd: 'node tests/test-dream-cluster.js' },
   { name: 'AI 做梦执行调度管道与状态机流转 (Dream Pipeline)', cmd: 'node tests/test-dream-pipeline.js' },
-  { name: 'Cron 定时表达式解析与匹配引擎 (dream cron 调度)', cmd: 'node tests/test-cron.js' }
+  { name: 'Cron 定时表达式解析与匹配引擎 (dream cron 调度)', cmd: 'node tests/test-cron.js' },
+  { name: 'Layer 5: WebUI 看板与内置 HTTP 服务端 (REST & 安全沙箱)', cmd: 'node tests/test-web-server.js' },
+  { name: 'Layer 5.5: 手动删除记忆与三表级联原子清理 (deleteKnowledge)', cmd: 'node tests/test-deletion.js' }
 ];
 
 try {
@@ -60,9 +62,9 @@ try {
     console.log('ℹ️ 当前环境未安装或未运行 OpenCode 全局 CLI，MCP 连通性探测优雅跳过。\n');
   }
 
-  console.log('====================================================');
-  console.log('🎉 13 大测试套件全部 100% 成功通过！');
-  console.log('====================================================');
+  console.log(`====================================================`);
+  console.log(`🎉 全部 ${suites.length} 大测试套件全部 100% 成功通过！`);
+  console.log(`====================================================`);
 } finally {
   // 清理临时测试沙箱
   try {

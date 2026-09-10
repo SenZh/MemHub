@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MemHub - 工程长效记忆与暗知识调度中枢</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              500: '#16a34a',
+              600: '#15803d',
+              700: '#166534',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    pre code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    /* 浅色主题柔和滚动条 */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f8fafc;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans antialiased selection:bg-emerald-100 selection:text-emerald-900">
+
+  <!-- 顶部导航栏 -->
+  <header class="border-b border-slate-200 bg-white/90 backdrop-blur sticky top-0 z-30 shadow-xs">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-4">
+        <div class="flex items-center space-x-2">
+          <div class="w-8 h-8 rounded-lg bg-emerald-100 border border-emerald-300 flex items-center justify-center text-emerald-700 font-bold text-base shadow-xs">
+            ⚡
+          </div>
+          <span class="text-xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-700 bg-clip-text text-transparent">
+            MemHub
+          </span>
+        </div>
+        <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-medium">v0.1.4</span>
+        <div class="hidden md:flex items-center space-x-2 text-xs text-slate-500 pl-4 border-l border-slate-200">
+          <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span>服务运行中</span>
+        </div>
+      </div>
+
+      <!-- Tab 切换按钮 -->
+      <nav class="flex space-x-1 sm:space-x-2" id="nav-tabs">
+        <button onclick="switchTab('dashboard')" id="tab-btn-dashboard" class="px-3 py-1.5 rounded-md text-sm font-medium transition bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-xs">
+          📊 态势大盘
+        </button>
+        <button onclick="switchTab('explorer')" id="tab-btn-explorer" class="px-3 py-1.5 rounded-md text-sm font-medium transition text-slate-600 hover:text-slate-900 hover:bg-slate-100">
+          📚 知识全景
+        </button>
+        <button onclick="switchTab('playground')" id="tab-btn-playground" class="px-3 py-1.5 rounded-md text-sm font-medium transition text-slate-600 hover:text-slate-900 hover:bg-slate-100">
+          🔬 检索实验
+        </button>
+        <button onclick="switchTab('audit')" id="tab-btn-audit" class="px-3 py-1.5 rounded-md text-sm font-medium transition text-slate-600 hover:text-slate-900 hover:bg-slate-100">
+          📋 审计与运维
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- 主体内容区 -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- Toast 提示容器 -->
+    <div id="toast-container" class="fixed top-20 right-6 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+    <!-- TAB 1: 态势大盘 -->
+    <section id="panel-dashboard" class="space-y-6">
+      <!-- 顶部 4 大 KPI 统计卡片 -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:shadow transition">
+          <div class="flex items-center justify-between text-slate-500 text-xs font-medium">
+            <span>长效资产总量</span>
+            <span class="text-base">📦</span>
+          </div>
+          <div class="mt-2 text-2xl font-bold tracking-tight text-slate-900" id="stat-total-knowledge">-</div>
+          <div class="mt-1 text-xs text-slate-400">经真实工程事实检验的沉淀</div>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:shadow transition">
+          <div class="flex items-center justify-between text-slate-500 text-xs font-medium">
+            <span>做梦熔炼 L4 升华</span>
+            <span class="text-base">✨</span>
+          </div>
+          <div class="mt-2 text-2xl font-bold tracking-tight text-emerald-600" id="stat-l4-count">-</div>
+          <div class="mt-1 text-xs text-slate-400">多碎片凝聚的高维认知架构</div>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:shadow transition">
+          <div class="flex items-center justify-between text-slate-500 text-xs font-medium">
+            <span>会话萃取转化</span>
+            <span class="text-base">🤖</span>
+          </div>
+          <div class="mt-2 text-2xl font-bold tracking-tight text-blue-600" id="stat-sessions">-</div>
+          <div class="mt-1 text-xs text-slate-400">已萃取 / 已过滤总会话数</div>
+        </div>
+
+        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:shadow transition">
+          <div class="flex items-center justify-between text-slate-500 text-xs font-medium">
+            <span>SQLite 单库体积</span>
+            <span class="text-base">💾</span>
+          </div>
+          <div class="mt-2 text-2xl font-bold tracking-tight text-violet-600" id="stat-db-size">-</div>
+          <div class="mt-1 text-xs text-slate-400 truncate" id="stat-db-path" title="">存储内核路径</div>
+        </div>
+      </div>
+
+      <!-- 做梦引擎成效与分类分布 -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- 分类占比分布 -->
+        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col justify-between">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-800 mb-4 flex items-center space-x-2">
+              <span>四大约束分类分布</span>
+            </h3>
+            <div class="space-y-3" id="category-bars">
+              <!-- JS 动态注入 -->
+            </div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500 flex justify-between">
+            <span>四大分类天然正交</span>
+            <span class="text-emerald-600 font-mono font-medium">100% 结构化</span>
+          </div>
+        </div>
+
+        <!-- 离线做梦自省大盘 -->
+        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col justify-between">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-800 mb-4 flex items-center justify-between">
+              <span>离线做梦与记忆熔炼 (Dreaming)</span>
+              <span class="text-xs px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">Cron 调度</span>
+            </h3>
+            <div class="grid grid-cols-2 gap-3 mb-4">
+              <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <div class="text-xs text-slate-500">已封存碎片</div>
+                <div class="text-lg font-bold text-slate-800 mt-1" id="dream-archived">-</div>
+              </div>
+              <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <div class="text-xs text-slate-500">碎片封存率</div>
+                <div class="text-lg font-bold text-emerald-600 mt-1" id="dream-ratio">-</div>
+              </div>
+              <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <div class="text-xs text-slate-500">熔炼总轮次</div>
+                <div class="text-lg font-bold text-blue-600 mt-1" id="dream-rounds">-</div>
+              </div>
+              <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <div class="text-xs text-slate-500">聚类候选碎片池</div>
+                <div class="text-lg font-bold text-amber-600 mt-1" id="dream-pool">-</div>
+              </div>
+            </div>
+          </div>
+          <div class="pt-3 border-t border-slate-100 text-xs text-slate-500">
+            三维聚类（标签交集 + 路径重叠 + 语义向量）闲时提炼
+          </div>
+        </div>
+
+        <!-- MCP 工具调用热度 -->
+        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col justify-between">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-800 mb-4">MCP 工具调用活跃度</h3>
+            <div class="space-y-3" id="mcp-tool-stats">
+              <!-- JS 动态注入 -->
+            </div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500 flex justify-between">
+            <span>渐进式双阶段防爆 Token</span>
+            <span class="text-slate-600 font-mono text-[11px]" id="saved-tokens-est">已节省 Token: -</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 项目资产分布矩阵表格 -->
+      <div class="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
+          <h3 class="text-sm font-semibold text-slate-800">项目空间资产矩阵 (Project Matrix)</h3>
+          <span class="text-xs text-slate-500">支持工作区私有空间与 global 通用穿透</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-slate-50 text-slate-600 text-xs border-b border-slate-200 font-medium">
+              <tr>
+                <th class="px-5 py-3">项目标识 (Project)</th>
+                <th class="px-5 py-3">排错避坑 (Learnings)</th>
+                <th class="px-5 py-3">架构决策 (Decisions)</th>
+                <th class="px-5 py-3">代码模板 (Patterns)</th>
+                <th class="px-5 py-3">业务规则 (Business)</th>
+                <th class="px-5 py-3 text-right">资产总计</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 font-mono text-xs text-slate-700" id="project-matrix-body">
+              <!-- JS 注入 -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: 知识全景大纲 -->
+    <section id="panel-explorer" class="hidden space-y-6">
+      <!-- 顶部多维筛选收窄控制栏 -->
+      <div class="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-xs">
+        <!-- 分类选择器 -->
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs text-slate-500 mr-2 font-medium">分类:</span>
+          <button onclick="setCategoryFilter('')" class="cat-pill active px-3 py-1 rounded-full text-xs font-medium border border-emerald-400 bg-emerald-50 text-emerald-800">全部</button>
+          <button onclick="setCategoryFilter('learnings')" class="cat-pill px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300">💥 排错避坑 (Learnings)</button>
+          <button onclick="setCategoryFilter('decisions')" class="cat-pill px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300">🏛️ 架构决策 (Decisions)</button>
+          <button onclick="setCategoryFilter('patterns')" class="cat-pill px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300">⚙️ 代码模板 (Patterns)</button>
+          <button onclick="setCategoryFilter('business')" class="cat-pill px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300">📜 业务规则 (Business)</button>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100 text-xs">
+          <!-- 状态选择 -->
+          <div class="flex items-center space-x-1.5">
+            <span class="text-slate-500">状态:</span>
+            <select id="filter-status" onchange="loadKnowledge()" class="bg-white border border-slate-300 text-slate-700 rounded px-2 py-1 text-xs outline-none focus:border-emerald-500">
+              <option value="active">🟢 有效活跃 (Active)</option>
+              <option value="consolidated">🔄 已做梦熔炼 (Consolidated)</option>
+              <option value="superseded">⚠️ 已被迭代 (Superseded)</option>
+              <option value="all">🌐 全部状态 (All)</option>
+            </select>
+          </div>
+
+          <!-- 项目收窄输入 -->
+          <div class="flex items-center space-x-1.5">
+            <span class="text-slate-500">项目:</span>
+            <input type="text" id="filter-project" placeholder="如 oms / global" onchange="loadKnowledge()" class="bg-white border border-slate-300 text-slate-800 rounded px-2 py-1 text-xs outline-none focus:border-emerald-500 w-28">
+          </div>
+
+          <!-- 标签过滤 -->
+          <div class="flex items-center space-x-1.5">
+            <span class="text-slate-500">标签:</span>
+            <input type="text" id="filter-tag" placeholder="如 docker / redis" onchange="loadKnowledge()" class="bg-white border border-slate-300 text-slate-800 rounded px-2 py-1 text-xs outline-none focus:border-emerald-500 w-28">
+          </div>
+
+          <button onclick="loadKnowledge()" class="ml-auto px-3 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition font-medium">
+            刷新列表
+          </button>
+        </div>
+      </div>
+
+      <!-- 卡片瀑布流列表 -->
+      <div id="knowledge-list" class="space-y-3">
+        <!-- JS 动态注入卡片 -->
+      </div>
+    </section>
+
+    <!-- TAB 3: 混合检索实验室 -->
+    <section id="panel-playground" class="hidden space-y-6">
+      <div class="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-xs">
+        <div>
+          <h2 class="text-base font-semibold text-slate-900">多模态混合检索实验室 (FTS5 + Vector + RRF)</h2>
+          <p class="text-xs text-slate-500 mt-1">
+            支持输入自然语言或错误堆栈。系统将并行触发 <strong>SQLite FTS5 Trigram 字符全文倒排</strong> 与 <strong>本地 384 维稠密特征向量空间余弦度量</strong>，并通过 <strong>RRF (倒数排名融合算法)</strong> 输出最终排序。
+          </p>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3">
+          <div class="relative flex-1">
+            <input type="text" id="search-query-input" placeholder="输入搜索词，如：Docker alpine glibc 或 分布式锁续期 或 支付回调" 
+                   onkeydown="if(event.key==='Enter') doSearch()"
+                   class="w-full bg-slate-50 border border-slate-300 text-slate-800 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500 transition shadow-xs">
+          </div>
+          <button onclick="doSearch()" class="px-6 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm transition shadow-xs">
+            执行检索
+          </button>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+          <div class="flex items-center space-x-2">
+            <span>限定项目:</span>
+            <input type="text" id="search-project-input" placeholder="默认全部" class="bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 w-28">
+          </div>
+          <div class="flex items-center space-x-2">
+            <span>限定分类:</span>
+            <select id="search-category-input" class="bg-white border border-slate-300 rounded px-2 py-1 text-slate-800">
+              <option value="">全部分类</option>
+              <option value="learnings">learnings (排错避坑)</option>
+              <option value="decisions">decisions (架构决策)</option>
+              <option value="patterns">patterns (代码模板)</option>
+              <option value="business">business (业务规则)</option>
+            </select>
+          </div>
+          <div id="search-meta" class="ml-auto text-emerald-700 font-mono font-medium hidden">
+            <!-- 检索耗时显示 -->
+          </div>
+        </div>
+      </div>
+
+      <!-- 检索结果列表 -->
+      <div id="search-results-list" class="space-y-3">
+        <div class="text-center py-12 text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl bg-white">
+          💡 请在上方输入关键词开始混合检索实验
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: MCP 审计与运维中心 -->
+    <section id="panel-audit" class="hidden space-y-6">
+      <!-- 快捷运维操作卡片 -->
+      <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
+        <h3 class="text-sm font-semibold text-slate-900 mb-2">手动运维与存储治理 (Ops Center)</h3>
+        <p class="text-xs text-slate-500 mb-4">通过安全 CSRF 校验直接触发底层存储引擎的原子维护操作。</p>
+
+        <div class="flex flex-wrap gap-4">
+          <button onclick="triggerOps('backup')" class="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 text-xs font-medium transition flex items-center space-x-2 shadow-xs">
+            <span>💾 立即原子热备份 (VACUUM INTO)</span>
+          </button>
+          <button onclick="triggerOps('export')" class="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 text-xs font-medium transition flex items-center space-x-2 shadow-xs">
+            <span>📝 一键全量导出为 Obsidian Markdown 树</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- MCP 调用审计表格 -->
+      <div class="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/50">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-900">MCP 工具调用审计流水 (Audit Trail)</h3>
+            <p class="text-xs text-slate-500 mt-0.5">记录各大 AI Agent（OpenCode / Cursor 等）与 MemHub 的每次交互</p>
+          </div>
+          <button onclick="loadAuditLogs()" class="text-xs text-slate-600 hover:text-slate-900 px-2.5 py-1 rounded bg-white border border-slate-200 shadow-xs font-medium">刷新流水</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-50 text-slate-600 border-b border-slate-200 font-medium">
+              <tr>
+                <th class="px-5 py-3">时间</th>
+                <th class="px-5 py-3">调用方</th>
+                <th class="px-5 py-3">调用的 MCP 工具</th>
+                <th class="px-5 py-3">Query / 参数关键词</th>
+                <th class="px-5 py-3 text-right">命中数</th>
+                <th class="px-5 py-3 text-right">耗时 (ms)</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 font-mono text-slate-700" id="audit-table-body">
+              <!-- JS 注入 -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- L2 详情展开 Modal / Drawer -->
+  <div id="detail-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white border border-slate-200 rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      <!-- Modal 头部 -->
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/80">
+        <div class="flex items-center space-x-3">
+          <span id="modal-category-badge" class="px-2.5 py-0.5 rounded text-xs font-semibold"></span>
+          <span id="modal-id" class="text-xs text-slate-500 font-mono"></span>
+        </div>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-700 text-lg px-2">✕</button>
+      </div>
+
+      <!-- Modal 滚动正文 -->
+      <div class="p-6 overflow-y-auto space-y-4 text-slate-800 text-sm">
+        <h2 id="modal-title" class="text-lg font-bold text-slate-900"></h2>
+        
+        <div class="flex flex-wrap gap-2 text-xs" id="modal-tags"></div>
+
+        <div class="border-t border-slate-100 pt-4">
+          <pre id="modal-markdown" class="whitespace-pre-wrap font-sans text-xs bg-slate-50 p-4 rounded-xl border border-slate-200 text-slate-800 leading-relaxed overflow-x-auto"></pre>
+        </div>
+      </div>
+
+      <!-- Modal 底部 -->
+      <div class="px-6 py-3 border-t border-slate-200 bg-slate-50/80 flex justify-between items-center text-xs text-slate-500">
+        <div class="flex items-center space-x-3">
+          <button onclick="handleDeleteCurrent()" class="px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition flex items-center space-x-1 shadow-xs cursor-pointer">
+            <span>🗑️ 删除记忆</span>
+          </button>
+          <span id="modal-time"></span>
+        </div>
+        <button onclick="closeModal()" class="px-4 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-800 font-medium transition cursor-pointer">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentTab = 'dashboard';
+    let currentCategoryFilter = '';
+    let currentDetailItem = null;
+
+    // 初始化加载
+    window.addEventListener('DOMContentLoaded', () => {
+      loadStats();
+    });
+
+    // 提示通知 Toast
+    function showToast(msg, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      const bg = type === 'success' ? 'bg-emerald-50 border-emerald-300 text-emerald-900' :
+                 type === 'error' ? 'bg-rose-50 border-rose-300 text-rose-900' :
+                 'bg-white border-slate-200 text-slate-800';
+      toast.className = `pointer-events-auto px-4 py-2.5 rounded-lg border text-xs font-medium shadow-lg backdrop-blur transition-all duration-300 transform translate-x-8 opacity-0 flex items-center space-x-2 ${bg}`;
+      toast.innerHTML = `<span>${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'}</span><span>${msg}</span>`;
+      container.appendChild(toast);
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-x-8', 'opacity-0');
+      });
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-x-8');
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    // Tab 切换逻辑
+    function switchTab(tab) {
+      currentTab = tab;
+      ['dashboard', 'explorer', 'playground', 'audit'].forEach(t => {
+        const btn = document.getElementById(`tab-btn-${t}`);
+        const panel = document.getElementById(`panel-${t}`);
+        if (t === tab) {
+          btn.className = 'px-3 py-1.5 rounded-md text-sm font-medium transition bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-xs';
+          panel.classList.remove('hidden');
+        } else {
+          btn.className = 'px-3 py-1.5 rounded-md text-sm font-medium transition text-slate-600 hover:text-slate-900 hover:bg-slate-100';
+          panel.classList.add('hidden');
+        }
+      });
+
+      if (tab === 'dashboard') loadStats();
+      if (tab === 'explorer') loadKnowledge();
+      if (tab === 'audit') loadAuditLogs();
+    }
+
+    // 格式化文件大小
+    function formatBytes(bytes) {
+      if (!bytes || bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+    }
+
+    // 加载态势大盘数据
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/status');
+        const json = await res.json();
+        if (!json.success) return showToast(json.error, 'error');
+
+        const { dbPath, dbSizeBytes, stats } = json.data;
+
+        document.getElementById('stat-total-knowledge').innerText = stats.total_knowledge_entries || 0;
+        document.getElementById('stat-db-size').innerText = formatBytes(dbSizeBytes);
+        document.getElementById('stat-db-path').innerText = dbPath || '';
+        document.getElementById('stat-db-path').title = dbPath || '';
+
+        // 做梦引擎成效
+        const dreaming = stats.dreaming || {};
+        document.getElementById('stat-l4-count').innerText = dreaming.synthesized_l4 || 0;
+        document.getElementById('dream-archived').innerText = dreaming.consolidated_fragments || 0;
+        const ratio = dreaming.candidate_pool > 0 ? ((dreaming.consolidated_fragments / (dreaming.candidate_pool + dreaming.consolidated_fragments)) * 100).toFixed(1) : 0;
+        document.getElementById('dream-ratio').innerText = `${ratio}%`;
+        document.getElementById('dream-rounds').innerText = dreaming.dream_rounds || 0;
+        document.getElementById('dream-pool').innerText = dreaming.candidate_pool || 0;
+
+        // 会话萃取状态
+        const sessions = stats.sessions_scanned || [];
+        const extracted = (sessions.find(s => s.status === 'EXTRACTED') || {}).count || 0;
+        const skipped = (sessions.find(s => s.status === 'SKIPPED') || {}).count || 0;
+        document.getElementById('stat-sessions').innerText = `${extracted} / ${extracted + skipped}`;
+
+        // 分类占比渲染
+        const catMap = { learnings: '💥 排错避坑', decisions: '🏛️ 架构决策', patterns: '⚙️ 代码模板', business: '📜 业务规则' };
+        const totalEntries = stats.total_knowledge_entries || 1;
+        const catContainer = document.getElementById('category-bars');
+        catContainer.innerHTML = '';
+        (stats.categories || []).forEach(c => {
+          const pct = Math.round((c.count / totalEntries) * 100);
+          catContainer.innerHTML += `
+            <div>
+              <div class="flex justify-between text-xs mb-1">
+                <span class="text-slate-700 font-medium">${catMap[c.category] || c.category}</span>
+                <span class="text-slate-500 font-mono">${c.count} 条 (${pct}%)</span>
+              </div>
+              <div class="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                <div class="h-full bg-emerald-500 rounded-full" style="width: ${pct}%"></div>
+              </div>
+            </div>
+          `;
+        });
+
+        // MCP 工具调用
+        const mcpContainer = document.getElementById('mcp-tool-stats');
+        mcpContainer.innerHTML = '';
+        (stats.mcp_tool_calls || []).forEach(tool => {
+          mcpContainer.innerHTML += `
+            <div class="flex items-center justify-between text-xs py-1">
+              <span class="font-mono text-slate-700 font-medium">${tool.tool_name}</span>
+              <div class="flex items-center space-x-3 text-slate-500 font-mono">
+                <span>${tool.count} 次</span>
+                <span class="text-emerald-600 font-semibold">${tool.avg_duration_ms ? tool.avg_duration_ms.toFixed(1) + 'ms' : '-'}</span>
+              </div>
+            </div>
+          `;
+        });
+        document.getElementById('saved-tokens-est').innerText = `已节省约: ${((stats.estimated_saved_tokens || 0) / 1000).toFixed(0)}k Tokens`;
+
+        // 项目资产分布矩阵
+        const matrixBody = document.getElementById('project-matrix-body');
+        matrixBody.innerHTML = '';
+        (stats.projects || []).forEach(p => {
+          matrixBody.innerHTML += `
+            <tr class="hover:bg-slate-50/80 transition">
+              <td class="px-5 py-3 font-semibold text-slate-900">${p.project}</td>
+              <td class="px-5 py-3 text-slate-600">${p.learnings || 0}</td>
+              <td class="px-5 py-3 text-slate-600">${p.decisions || 0}</td>
+              <td class="px-5 py-3 text-slate-600">${p.patterns || 0}</td>
+              <td class="px-5 py-3 text-slate-600">${p.business || 0}</td>
+              <td class="px-5 py-3 text-right font-bold text-emerald-700">${p.total || 0}</td>
+            </tr>
+          `;
+        });
+      } catch (e) {
+        showToast('加载态势看板失败', 'error');
+      }
+    }
+
+    // 设置分类过滤 Pill
+    function setCategoryFilter(cat) {
+      currentCategoryFilter = cat;
+      document.querySelectorAll('.cat-pill').forEach(btn => {
+        btn.className = 'cat-pill px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300';
+      });
+      event.target.className = 'cat-pill active px-3 py-1 rounded-full text-xs font-medium border border-emerald-400 bg-emerald-50 text-emerald-800';
+      loadKnowledge();
+    }
+
+    // 分类 Badge 样式生成
+    function getCategoryBadge(cat) {
+      const styles = {
+        learnings: 'bg-amber-50 text-amber-800 border border-amber-300',
+        decisions: 'bg-blue-50 text-blue-800 border border-blue-300',
+        patterns: 'bg-emerald-50 text-emerald-800 border border-emerald-300',
+        business: 'bg-purple-50 text-purple-800 border border-purple-300'
+      };
+      return `<span class="text-[11px] px-2 py-0.5 rounded font-mono font-semibold ${styles[cat] || 'bg-slate-100 text-slate-700'}">${cat}</span>`;
+    }
+
+    // 状态 Badge 样式生成
+    function getStatusBadge(status) {
+      if (status === 'consolidated') {
+        return `<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium">🔄 已做梦熔炼</span>`;
+      }
+      if (status === 'superseded') {
+        return `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">⚠️ 已迭代废弃</span>`;
+      }
+      return `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">🟢 有效</span>`;
+    }
+
+    // 加载知识全景列表
+    async function loadKnowledge() {
+      const status = document.getElementById('filter-status').value;
+      const project = document.getElementById('filter-project').value.trim();
+      const tag = document.getElementById('filter-tag').value.trim();
+
+      const params = new URLSearchParams();
+      if (currentCategoryFilter) params.set('category', currentCategoryFilter);
+      if (status) params.set('status', status);
+      if (project) params.set('project', project);
+      if (tag) params.set('tag', tag);
+      params.set('limit', '50');
+
+      try {
+        const res = await fetch(`/api/knowledge?${params.toString()}`);
+        const json = await res.json();
+        if (!json.success) return showToast(json.error, 'error');
+
+        const container = document.getElementById('knowledge-list');
+        container.innerHTML = '';
+
+        if (!json.data.items || json.data.items.length === 0) {
+          container.innerHTML = `<div class="text-center py-12 text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl bg-white">暂无符合条件的工程记忆卡片</div>`;
+          return;
+        }
+
+        json.data.items.forEach(item => {
+          const tagsHtml = (item.tags || []).map(t => `<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-mono border border-slate-200/60">#${t}</span>`).join(' ');
+          const dateStr = item.created_at ? new Date(item.created_at).toLocaleString('zh-CN', { hour12: false }) : '-';
+          
+          container.innerHTML += `
+            <div data-card-id="${item.id}" onclick="openDetail('${item.id}')" class="bg-white hover:bg-slate-50 border border-slate-200/80 hover:border-slate-300 rounded-xl p-4 cursor-pointer transition shadow-xs hover:shadow space-y-2.5">
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+                  ${getCategoryBadge(item.category)}
+                  <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono border border-slate-200 font-medium">${item.project || 'global'}</span>
+                  ${getStatusBadge(item.status)}
+                  <span class="text-xs font-mono text-slate-400">${item.id}</span>
+                </div>
+                <span class="text-[11px] text-slate-400 font-mono whitespace-nowrap">${dateStr}</span>
+              </div>
+              <h4 class="text-sm font-bold text-slate-900">${item.title}</h4>
+              <p class="text-xs text-slate-600 line-clamp-2 leading-relaxed">${item.summary || '无简述'}</p>
+              <div class="flex items-center space-x-2 pt-1">
+                ${tagsHtml}
+              </div>
+            </div>
+          `;
+        });
+      } catch (e) {
+        showToast('加载知识列表失败', 'error');
+      }
+    }
+
+    // 混合检索实验
+    async function doSearch() {
+      const query = document.getElementById('search-query-input').value.trim();
+      const project = document.getElementById('search-project-input').value.trim();
+      const category = document.getElementById('search-category-input').value;
+
+      if (!query) {
+        return showToast('请输入检索关键词', 'info');
+      }
+
+      try {
+        const res = await fetch('/api/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, project: project || undefined, category: category || undefined, limit: 15 })
+        });
+        const json = await res.json();
+        if (!json.success) return showToast(json.error, 'error');
+
+        const { duration_ms, items } = json.data;
+        const metaEl = document.getElementById('search-meta');
+        metaEl.innerText = `耗时: ${duration_ms}ms | 命中: ${items.length} 条`;
+        metaEl.classList.remove('hidden');
+
+        const container = document.getElementById('search-results-list');
+        container.innerHTML = '';
+
+        if (!items || items.length === 0) {
+          container.innerHTML = `<div class="text-center py-12 text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl bg-white">未检索到相关长效记忆资产</div>`;
+          return;
+        }
+
+        items.forEach((item, index) => {
+          const tagsHtml = (item.tags || []).map(t => `<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-mono border border-slate-200/60">#${t}</span>`).join(' ');
+          const scoreStr = item.score !== undefined ? `RRF 得分: ${item.score}` : '';
+
+          container.innerHTML += `
+            <div data-card-id="${item.id}" onclick="openDetail('${item.id}')" class="bg-white hover:bg-slate-50 border border-slate-200/80 hover:border-slate-300 rounded-xl p-4 cursor-pointer transition shadow-xs hover:shadow space-y-2">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                  <span class="text-xs font-bold text-emerald-700 font-mono">#${index + 1}</span>
+                  ${getCategoryBadge(item.category)}
+                  <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono border border-slate-200 font-medium">${item.project || 'global'}</span>
+                  <span class="text-xs font-mono text-slate-400">${item.id}</span>
+                </div>
+                <span class="text-xs font-mono text-emerald-700 font-bold">${scoreStr}</span>
+              </div>
+              <h4 class="text-sm font-bold text-slate-900">${item.title}</h4>
+              <p class="text-xs text-slate-600 line-clamp-2 leading-relaxed">${item.summary || ''}</p>
+              <div class="flex items-center space-x-2 pt-1">
+                ${tagsHtml}
+              </div>
+            </div>
+          `;
+        });
+      } catch (e) {
+        showToast('检索服务异常', 'error');
+      }
+    }
+
+    // 查看 L2 详情
+    async function openDetail(id) {
+      try {
+        const res = await fetch(`/api/knowledge/${id}`);
+        const json = await res.json();
+        if (!json.success) return showToast(json.error, 'error');
+
+        const item = json.data;
+        currentDetailItem = item;
+
+        document.getElementById('modal-id').innerText = item.id;
+        document.getElementById('modal-title').innerText = item.title;
+        document.getElementById('modal-category-badge').className = `px-2.5 py-0.5 rounded text-xs font-semibold ${item.category === 'learnings' ? 'bg-amber-100 text-amber-800' : item.category === 'decisions' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'}`;
+        document.getElementById('modal-category-badge').innerText = item.category;
+
+        const tagsContainer = document.getElementById('modal-tags');
+        tagsContainer.innerHTML = (item.tags || []).map(t => `<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-mono border border-slate-200 text-xs">#${t}</span>`).join(' ');
+
+        document.getElementById('modal-markdown').innerText = item.content || '无正文渲染内容';
+        document.getElementById('modal-time').innerText = `录入时间: ${new Date(item.time_created).toLocaleString('zh-CN', { hour12: false })}`;
+
+        document.getElementById('detail-modal').classList.remove('hidden');
+      } catch (e) {
+        showToast('拉取卡片详情失败', 'error');
+      }
+    }
+
+    function closeModal() {
+      document.getElementById('detail-modal').classList.add('hidden');
+      currentDetailItem = null;
+    }
+
+    // 手动删除当前记忆（二次确认防误触 + 跨视图即时 DOM 清理）
+    async function handleDeleteCurrent() {
+      if (!currentDetailItem) return;
+      const targetId = currentDetailItem.id;
+      const targetTitle = currentDetailItem.title || targetId;
+
+      const confirmed = confirm(`⚠️ 危险操作：确定要彻底物理删除卡片「${targetTitle}」(${targetId}) 吗？\n\n此操作将同时清理全文倒排索引与语义向量，且无法撤销！`);
+      if (!confirmed) return;
+
+      try {
+        const res = await fetch(`/api/knowledge/${targetId}`, {
+          method: 'DELETE',
+          headers: {
+            'X-MemHub-Request': '1'
+          }
+        });
+        const json = await res.json();
+        if (!json.success) {
+          return showToast(json.error || '删除失败', 'error');
+        }
+
+        showToast(`已成功删除知识卡片: ${targetTitle}`, 'success');
+        closeModal();
+
+        // 跨视图即时从 DOM 中移除对应卡片
+        document.querySelectorAll(`[data-card-id="${targetId}"]`).forEach(el => el.remove());
+
+        // 异步更新态势大盘
+        loadStats();
+      } catch (e) {
+        showToast('删除请求异常', 'error');
+      }
+    }
+
+    // 加载 MCP 审计流水
+    async function loadAuditLogs() {
+      try {
+        const res = await fetch('/api/audit?limit=50');
+        const json = await res.json();
+        if (!json.success) return showToast(json.error, 'error');
+
+        const tbody = document.getElementById('audit-table-body');
+        tbody.innerHTML = '';
+
+        if (!json.data.logs || json.data.logs.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="6" class="px-5 py-8 text-center text-slate-400">暂无 MCP 调用流水</td></tr>`;
+          return;
+        }
+
+        json.data.logs.forEach(log => {
+          const timeStr = log.created_at ? new Date(log.created_at).toLocaleString('zh-CN', { hour12: false }) : '-';
+          tbody.innerHTML += `
+            <tr class="hover:bg-slate-50 transition">
+              <td class="px-5 py-2.5 text-slate-500 whitespace-nowrap">${timeStr}</td>
+              <td class="px-5 py-2.5 font-semibold text-slate-800">${log.caller || 'opencode'}</td>
+              <td class="px-5 py-2.5 text-emerald-700 font-bold">${log.tool_name}</td>
+              <td class="px-5 py-2.5 text-slate-800 truncate max-w-xs" title="${log.query_text || ''}">${log.query_text || '-'}</td>
+              <td class="px-5 py-2.5 text-right text-slate-700">${log.hit_count !== null ? log.hit_count : '-'}</td>
+              <td class="px-5 py-2.5 text-right text-blue-600 font-medium">${log.duration_ms}ms</td>
+            </tr>
+          `;
+        });
+      } catch (e) {
+        showToast('拉取审计流水失败', 'error');
+      }
+    }
+
+    // 触发运维操作 (带 CSRF 请求头)
+    async function triggerOps(action) {
+      try {
+        showToast(`正在执行 ${action}...`, 'info');
+        const res = await fetch(`/api/ops/${action}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-MemHub-Request': '1'
+          }
+        });
+        const json = await res.json();
+        if (!json.success) {
+          return showToast(json.error, 'error');
+        }
+
+        if (action === 'backup') {
+          showToast(`热备份成功！耗时 ${json.data.duration_ms}ms`, 'success');
+        } else if (action === 'export') {
+          showToast(`全量 Markdown 导出成功！共导出 ${json.data.totalExported} 篇`, 'success');
+        }
+      } catch (e) {
+        showToast('运维操作请求失败', 'error');
+      }
+    }
+  </script>
+</body>
+</html>

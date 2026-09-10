@@ -2,9 +2,9 @@
 
 ## 1. 项目定位
 MemHub 是专为 AI 编程与软件工程设计的**工程长效记忆与暗知识调度中枢（Unified Memory & Knowledge Hub）**，面向任意 AI Agent（OpenCode、Cursor、Claude Code、Codex 等不限工具）。
-当前正式交付版本为 **v0.1.1**。
+当前正式交付版本为 **v0.1.5**。
 通过将开发者与 Agent 交互中产生的架构权衡决策（ADR）、隐性业务潜规则、排错根因因果链与关键配置配方结构化沉淀为原子长效资产，彻底消灭“跨会话人肉翻历史记录”和“反复踩同一个坑”的痛点。
-核心差异化：**借宿主 Agent 算力提炼（0 外部 API）+ 专注高密度工程决策与排错因果 + 单文件 SQLite 工业内核与 DDL 自愈 + 极简动宾 memhub_* 两阶段渐进披露协议 + 物理终态证据门禁 (Truth Gate) + 灵活路径 include/exclude 规则**。
+核心差异化：**借宿主 Agent 算力提炼（0 外部 API）+ 专注高密度工程决策与排错因果 + 单文件 SQLite 工业内核与 DDL 自愈 + 极简动宾 memhub_* 两阶段渐进披露协议 + 物理终态证据门禁 (Truth Gate) + 灵活路径 include/exclude 规则 + 开箱即用 0 依赖 WebUI 外脑工程资产驾驶舱**。
 
 ## 2. 核心文档清单
 - [目标差距分析与演进计划书 (Roadmap & Progress)](./roadmap-and-progress.md)：当前已完成模块、全量设计目标差距对比（Gap Analysis）、下一版本规划（v0.2.0 做梦自省引擎与知识地图）与演进路线。

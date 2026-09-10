@@ -59,6 +59,20 @@
   - 多维透视全局资产与四大分类分布；
   - 自动按 Project 汇总排错、决策、模式与业务资产对比，量化估算规避试错节省的 Token 价值；
   - **做梦引擎成效透视**：独立统计 L4 升华卡片数、已封存碎片数、做梦熔炼轮次、待做梦候选池与失败冷却数。
+- 🖥️ **现代化 WebUI 可视化外脑看板与内置 HTTP 服务 (`memhub ui`)**：
+  - **零外部运行时重型依赖**：服务端基于 Node.js 原生 `node:http` 模块，前端采用无构建单文件 SPA，开箱即用，秒级秒开；
+  - **优雅护眼浅色工程主题**：清爽卡片布局，高对比度字体与分类徽标，彻底告别深色眩晕；
+  - **四大交互工作区**：
+    - 📊 **态势大盘**：4 大核心 KPI、分类占比、项目空间资产矩阵与做梦熔炼去重效益；
+    - 📚 **知识全景**：多维参数收窄（分类/状态/项目/标签），L1 摘要卡片瀑布流，点击抽屉沉浸展开 L2 渲染 Markdown；
+    - 🔬 **检索实验室**：支持自然语言与错误堆栈混合检索，实时透出 RRF 综合打分（Score）与检索耗时；
+    - 📋 **审计流水与运维**：MCP 调用流水表格，一键触发 SQLite 原生 `VACUUM INTO` 热备与 Obsidian Markdown 目录树导出；
+  - **纵深安全防御**：绝对路径规范化沙箱防穿越（Anti-Path Traversal）、本地 Origin 回环隔离、敏感写操作 CSRF 自定义头防御（`X-MemHub-Request: 1`）与 1MB 流式请求体超限熔断；
+  - **独立与伴生双模**：支持 `memhub ui` 独立启动并自动唤起浏览器，亦支持 `memhub daemon --ui` 伴生脱机运行且异常绝对隔离。
+- 🗑️ **手动删除记忆与三表级联原子清理 (`memhub delete`)**：
+  - **事务级强一致性**：原生 SQLite `BEGIN IMMEDIATE` 排他写事务级联清理主表 `knowledge_items`、倒排虚表 `knowledge_fts` 与向量表 `knowledge_embeddings`，任一异常原子回滚，彻底杜绝“幽灵召回” (0 Ghost Hits)；
+  - **防手滑二次确认**：WebUI 详情弹窗提供警示按钮，确认弹窗动态呈现卡片标题与 ID，删除成功后跨视图即时物理移除 DOM 节点；
+  - **全链路命令支持**：CLI 提供 `memhub delete <id>` / `memhub rm <id>`，支持交互确认与 `-y/--yes` 静默模式。
 - 🛡️ **物理终态成功证据门禁 (Truth Verification Gate)**：
   - 提炼引擎前置检验退出码 0、测试通过或服务就绪证据，严禁记录未经验证的猜测。
 - 🔒 **敏感凭据深度递归脱敏 (Secret Scrubbing)**：
@@ -134,6 +148,9 @@ opencode mcp list
 # 启动后台常驻守护（默认每 30 分钟轮询，扫描最近 7 天更新且静默超过 120 分钟的冷态会话）
 memhub daemon
 
+# 伴生拉起 WebUI 看板服务
+memhub daemon start --ui
+
 # 自定义轮询参数与静默时间
 memhub daemon --interval 60 --window-days 7 --idle 120 --limit 5
 
@@ -176,6 +193,17 @@ memhub backup
 
 # 将 SQLite 知识库无损导出为人类友好的 Markdown 目录树 (Obsidian兼容)
 memhub export
+
+# 启动 WebUI 视觉外脑看板（默认监听 127.0.0.1:3900 并自动打开浏览器）
+memhub ui
+
+# 指定端口启动 WebUI 并禁止自动打开浏览器
+memhub ui --port 3905 --no-open
+
+# 物理删除指定的知识卡片与索引（支持 -y/--yes 静默免确认）
+memhub delete kb-c3ffcbe1 --yes
+# 或别名:
+memhub rm kb-c3ffcbe1 -y
 
 # 全量/增量为已有知识计算 384 维语义向量并持久化
 memhub embed

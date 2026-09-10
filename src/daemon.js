@@ -157,6 +157,8 @@ export function startDaemonBackground(cliOptions = {}) {
   if (cliOptions.limit) childArgs.push('--limit', String(cliOptions.limit));
   if (cliOptions.dryRun) childArgs.push('--dry-run');
   if (cliOptions.force) childArgs.push('--force');
+  if (cliOptions.ui) childArgs.push('--ui');
+  if (cliOptions.uiPort) childArgs.push('--ui-port', String(cliOptions.uiPort));
 
   // 3. 打开日志文件描述符并脱离当前终端派生 (detached)
   const logFd = fs.openSync(LOG_FILE, 'a');
@@ -511,6 +513,21 @@ export function runDaemonForeground(cliOptions = {}) {
   }
 
   // 常驻定时
+  let webServerInstance = null;
+  if (cliOptions.ui) {
+    import('./server/index.js').then(({ startWebServer }) => {
+      const port = Number(cliOptions.uiPort) || 3900;
+      startWebServer({ port, open: false }).then(instance => {
+        webServerInstance = instance.server;
+        console.log(`[memhub daemon] 伴生 WebUI HTTP Server 启动成功 (端口: ${port})`);
+      }).catch(err => {
+        console.warn(`[memhub daemon] 伴生 WebUI HTTP Server 启动警告: ${err.message}`);
+      });
+    }).catch(err => {
+      console.warn(`[memhub daemon] 加载 WebServer 模块失败: ${err.message}`);
+    });
+  }
+
   tick();
   const timer = setInterval(tick, intervalMinutes * 60 * 1000);
 
@@ -520,6 +537,9 @@ export function runDaemonForeground(cliOptions = {}) {
     stopping = true;
     console.log('\n[memhub daemon] 收到退出信号，正在优雅退出...');
     clearInterval(timer);
+    if (webServerInstance) {
+      try { webServerInstance.close(); } catch {}
+    }
     try {
       if (fs.existsSync(PID_FILE)) {
         const raw = fs.readFileSync(PID_FILE, 'utf8').trim();

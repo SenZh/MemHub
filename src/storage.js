@@ -555,7 +555,8 @@ export function searchKnowledge(query, options = {}) {
   if (cleanQuery.length >= 3) {
     let sql = `
       SELECT 
-        k.id, k.title, k.category, k.project, k.tags, k.summary, k.related_files, k.time_created
+        k.id, k.title, k.category, k.project, k.tags, k.summary, k.related_files, k.time_created,
+        k.status, k.consolidated_into
       FROM knowledge_fts fts
       JOIN knowledge_items k ON fts.id = k.id
       WHERE knowledge_fts MATCH ? AND k.status = 'active'
@@ -592,6 +593,7 @@ export function searchKnowledge(query, options = {}) {
     let vecSql = `
       SELECT 
         k.id, k.title, k.category, k.project, k.tags, k.summary, k.related_files, k.time_created,
+        k.status, k.consolidated_into,
         e.vector
       FROM knowledge_embeddings e
       JOIN knowledge_items k ON e.id = k.id
@@ -630,6 +632,8 @@ export function searchKnowledge(query, options = {}) {
             summary: row.summary,
             related_files: row.related_files,
             time_created: row.time_created,
+            status: row.status,
+            consolidated_into: row.consolidated_into,
             score: sim
           });
         }
@@ -646,13 +650,13 @@ export function searchKnowledge(query, options = {}) {
       { limit, k: 60 }
     );
     if (fused.length > 0) {
-      return fused.map(f => formatL1Result(f.item));
+      return fused.map(f => formatL1Result(f.item, options.includeScores ? (f.rrfScore ?? f.score) : null));
     }
   }
 
   // === 降级兜底：LIKE 模糊匹配（向下兼容短词与边界）===
   let fallbackSql = `
-    SELECT id, title, category, project, tags, summary, related_files, time_created
+    SELECT id, title, category, project, tags, summary, related_files, time_created, status, consolidated_into
     FROM knowledge_items k
     WHERE (k.title LIKE ? OR k.tags LIKE ? OR k.summary LIKE ? OR k.context_text LIKE ?) AND k.status = 'active'
   `;
@@ -677,7 +681,7 @@ export function searchKnowledge(query, options = {}) {
 
   const stmt = db.prepare(fallbackSql);
   const rows = stmt.all(...fallbackParams);
-  return rows.map(formatL1Result);
+  return rows.map(r => formatL1Result(r, options.includeScores ? 0.1 : null));
 }
 
 /**
@@ -717,8 +721,8 @@ export function syncEmbeddings(customDb = null) {
   return { processed: count };
 }
 
-function formatL1Result(row) {
-  return {
+function formatL1Result(row, score = null) {
+  const res = {
     id: row.id,
     title: row.title,
     category: row.category,
@@ -728,6 +732,12 @@ function formatL1Result(row) {
     related_files: JSON.parse(row.related_files || '[]'),
     created_at: Number(row.time_created)
   };
+  if (row.status !== undefined) res.status = row.status;
+  if (row.consolidated_into !== undefined) res.consolidated_into = row.consolidated_into;
+  if (score !== null && score !== undefined) {
+    res.score = Number(Number(score).toFixed(6));
+  }
+  return res;
 }
 
 /**
@@ -891,8 +901,10 @@ export function getKnowledgeBatch(ids = []) {
 export function listRecent(options = {}) {
   const db = getDatabase();
   const limit = options.limit || 10;
+  const offset = options.offset || 0;
   const project = options.project || options.workspace || null;
   const rawCat = options.category ? normalizeCategory(options.category) : null;
+  const status = options.status || 'active';
 
   const rawTags = Array.isArray(options.tags) 
     ? options.tags 
@@ -900,11 +912,16 @@ export function listRecent(options = {}) {
   const cleanTags = rawTags.map(t => String(t).trim().toLowerCase()).filter(Boolean);
 
   let sql = `
-    SELECT id, title, category, project, tags, summary, related_files, time_created 
+    SELECT id, title, category, project, tags, summary, related_files, time_created, status, consolidated_into
     FROM knowledge_items 
-    WHERE status = 'active'
+    WHERE 1=1
   `;
   const params = [];
+
+  if (status !== 'all') {
+    sql += ` AND status = ?`;
+    params.push(status);
+  }
 
   if (project) {
     sql += ` AND (project = ? OR project = 'global')`;
@@ -921,6 +938,11 @@ export function listRecent(options = {}) {
 
   sql += ` ORDER BY time_created DESC LIMIT ?`;
   params.push(limit);
+
+  if (offset > 0) {
+    sql += ` OFFSET ?`;
+    params.push(offset);
+  }
 
   const stmt = db.prepare(sql);
   const rows = stmt.all(...params);
@@ -1235,4 +1257,43 @@ export function getMcpAuditLogs(options = {}) {
   params.push(limit);
 
   return db.prepare(sql).all(...params);
+}
+
+/**
+ * 物理级联删除知识卡片（事务原子级清理：主表、FTS 倒排索引、特征向量）
+ * 严格使用原生 SQLite BEGIN IMMEDIATE 排他事务，任一环节失败立即回滚
+ */
+export function deleteKnowledge(id) {
+  const db = getDatabase();
+  const existing = db.prepare('SELECT id, title FROM knowledge_items WHERE id = ?').get(id);
+  if (!existing) {
+    return { success: false, notFound: true, message: `知识卡片 [${id}] 不存在` };
+  }
+
+  db.exec('BEGIN IMMEDIATE;');
+  try {
+    // 1. 删除主表实体
+    db.prepare('DELETE FROM knowledge_items WHERE id = ?').run(id);
+    
+    // 2. 清理 FTS5 倒排索引（严禁吞错，保证原子回滚）
+    db.prepare('DELETE FROM knowledge_fts WHERE id = ?').run(id);
+
+    // 3. 清理 384 维稠密特征向量（严禁吞错，保证原子回滚）
+    db.prepare('DELETE FROM knowledge_embeddings WHERE id = ?').run(id);
+
+    db.exec('COMMIT;');
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK;');
+    } catch (rbErr) {}
+    console.error(`[storage] 删除卡片 [${id}] 级联事务异常回滚:`, err.message);
+    throw new Error(`删除卡片 [${id}] 级联事务失败，已原子回滚: ${err.message}`);
+  }
+
+  return { 
+    success: true, 
+    id, 
+    title: existing.title, 
+    message: `知识卡片 [${id}] 已成功物理删除` 
+  };
 }
