@@ -46,7 +46,7 @@
 
   <!-- 顶部导航栏 -->
   <header class="border-b border-slate-200 bg-white/90 backdrop-blur sticky top-0 z-30 shadow-xs">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
       <div class="flex items-center space-x-4">
         <div class="flex items-center space-x-2">
           <div class="w-8 h-8 rounded-lg bg-emerald-100 border border-emerald-300 flex items-center justify-center text-emerald-700 font-bold text-base shadow-xs">
@@ -56,7 +56,7 @@
             MemHub
           </span>
         </div>
-        <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-medium">v0.1.4</span>
+        <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-medium">v0.1.6</span>
         <div class="hidden md:flex items-center space-x-2 text-xs text-slate-500 pl-4 border-l border-slate-200">
           <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
           <span>服务运行中</span>
@@ -64,17 +64,17 @@
       </div>
 
       <!-- Tab 切换按钮 -->
-      <nav class="flex space-x-1 sm:space-x-2" id="nav-tabs">
-        <button onclick="switchTab('dashboard')" id="tab-btn-dashboard" class="px-3 py-1.5 rounded-md text-sm font-medium transition bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-xs">
+      <nav class="flex items-center space-x-1 sm:space-x-2" id="nav-tabs">
+        <button type="button" onclick="switchTab('dashboard')" id="tab-btn-dashboard" class="px-3 py-1.5 rounded-md text-sm font-medium transition bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-xs cursor-pointer whitespace-nowrap">
           📊 态势大盘
         </button>
-        <button onclick="switchTab('explorer')" id="tab-btn-explorer" class="px-3 py-1.5 rounded-md text-sm font-medium transition text-slate-600 hover:text-slate-900 hover:bg-slate-100">
+        <button type="button" onclick="switchTab('explorer')" id="tab-btn-explorer" class="px-3 py-1.5 rounded-md text-sm font-medium transition text-slate-600 hover:text-slate-900 hover:bg-slate-100 cursor-pointer whitespace-nowrap">
           📚 知识全景
         </button>
-        <button onclick="switchTab('playground')" id="tab-btn-playground" class="px-3 py-1.5 rounded-md text-sm font-medium transition text-slate-600 hover:text-slate-900 hover:bg-slate-100">
+        <button type="button" onclick="switchTab('playground')" id="tab-btn-playground" class="px-3 py-1.5 rounded-md text-sm font-medium transition text-slate-600 hover:text-slate-900 hover:bg-slate-100 cursor-pointer whitespace-nowrap">
           🔬 检索实验
         </button>
-        <button onclick="switchTab('audit')" id="tab-btn-audit" class="px-3 py-1.5 rounded-md text-sm font-medium transition text-slate-600 hover:text-slate-900 hover:bg-slate-100">
+        <button type="button" onclick="switchTab('audit')" id="tab-btn-audit" class="px-3 py-1.5 rounded-md text-sm font-medium transition text-slate-600 hover:text-slate-900 hover:bg-slate-100 cursor-pointer whitespace-nowrap">
           📋 审计与运维
         </button>
       </nav>
@@ -241,6 +241,9 @@
         <div class="flex flex-wrap items-center gap-2">
           <span class="text-xs text-slate-500 mr-2 font-medium">分类:</span>
           <button onclick="setCategoryFilter('')" class="cat-pill active px-3 py-1 rounded-full text-xs font-medium border border-emerald-400 bg-emerald-50 text-emerald-800">全部</button>
+          <button onclick="setCategoryFilter('l4')" class="cat-pill px-3 py-1 rounded-full text-xs font-medium border border-purple-300 bg-purple-50 text-purple-800 hover:border-purple-400 hover:bg-purple-100/70 flex items-center space-x-1 shadow-2xs">
+            <span>✨ L4 认知规约</span>
+          </button>
           <button onclick="setCategoryFilter('learnings')" class="cat-pill px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300">💥 排错避坑 (Learnings)</button>
           <button onclick="setCategoryFilter('decisions')" class="cat-pill px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300">🏛️ 架构决策 (Decisions)</button>
           <button onclick="setCategoryFilter('patterns')" class="cat-pill px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300">⚙️ 代码模板 (Patterns)</button>
@@ -253,6 +256,7 @@
             <span class="text-slate-500">状态:</span>
             <select id="filter-status" onchange="loadKnowledge()" class="bg-white border border-slate-300 text-slate-700 rounded px-2 py-1 text-xs outline-none focus:border-emerald-500">
               <option value="active">🟢 有效活跃 (Active)</option>
+              <option value="l4">✨ L4 认知规约 (Synthesized)</option>
               <option value="consolidated">🔄 已做梦熔炼 (Consolidated)</option>
               <option value="superseded">⚠️ 已被迭代 (Superseded)</option>
               <option value="all">🌐 全部状态 (All)</option>
@@ -640,15 +644,7 @@
     // 从大盘一键查看 L4 认知规约卡片
     function filterByL4Cards() {
       switchTab('explorer');
-      const sel = document.getElementById('filter-status');
-      if (sel) sel.value = 'all';
-      document.getElementById('filter-project').value = '';
-      document.getElementById('filter-tag').value = '';
-      currentCategoryFilter = '';
-      document.querySelectorAll('.cat-pill').forEach((btn, idx) => {
-        btn.className = idx === 0 ? 'cat-pill active px-3 py-1 rounded-full text-xs font-medium border border-emerald-400 bg-emerald-50 text-emerald-800' : 'cat-pill px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300';
-      });
-      loadKnowledge();
+      setCategoryFilter('l4');
     }
 
     // 打开做梦自省审计台账流水窗口
@@ -718,8 +714,12 @@
       const tag = document.getElementById('filter-tag').value.trim();
 
       const params = new URLSearchParams();
-      if (currentCategoryFilter) params.set('category', currentCategoryFilter);
-      if (status) params.set('status', status);
+      if (currentCategoryFilter === 'l4') {
+        params.set('status', 'l4');
+      } else {
+        if (currentCategoryFilter) params.set('category', currentCategoryFilter);
+        if (status) params.set('status', status);
+      }
       if (project) params.set('project', project);
       if (tag) params.set('tag', tag);
       params.set('limit', '50');
@@ -808,6 +808,7 @@
                   <span class="text-xs font-bold text-emerald-700 font-mono">#${index + 1}</span>
                   ${getCategoryBadge(item.category)}
                   <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono border border-slate-200 font-medium">${item.project || 'global'}</span>
+                  ${getStatusBadge(item)}
                   <span class="text-xs font-mono text-slate-400">${item.id}</span>
                 </div>
                 <span class="text-xs font-mono text-emerald-700 font-bold">${scoreStr}</span>

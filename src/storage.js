@@ -594,8 +594,9 @@ export function searchKnowledge(query, options = {}) {
   if (cleanQuery.length >= 3) {
     let sql = `
       SELECT 
-        k.id, k.title, k.category, k.project, k.tags, k.summary, k.related_files, k.time_created,
-        k.status, k.consolidated_into
+        fts.id, k.title, k.category, k.project, k.tags, k.summary, k.related_files, k.time_created,
+        k.status, k.consolidated_into, k.is_synthesized,
+        bm25(knowledge_fts, 5.0, 2.0, 1.0, 1.5) as rank
       FROM knowledge_fts fts
       JOIN knowledge_items k ON fts.id = k.id
       WHERE knowledge_fts MATCH ? AND k.status = 'active'
@@ -632,7 +633,7 @@ export function searchKnowledge(query, options = {}) {
     let vecSql = `
       SELECT 
         k.id, k.title, k.category, k.project, k.tags, k.summary, k.related_files, k.time_created,
-        k.status, k.consolidated_into,
+        k.status, k.consolidated_into, k.is_synthesized,
         e.vector
       FROM knowledge_embeddings e
       JOIN knowledge_items k ON e.id = k.id
@@ -695,7 +696,7 @@ export function searchKnowledge(query, options = {}) {
 
   // === 降级兜底：LIKE 模糊匹配（向下兼容短词与边界）===
   let fallbackSql = `
-    SELECT id, title, category, project, tags, summary, related_files, time_created, status, consolidated_into
+    SELECT id, title, category, project, tags, summary, related_files, time_created, status, consolidated_into, is_synthesized
     FROM knowledge_items k
     WHERE (k.title LIKE ? OR k.tags LIKE ? OR k.summary LIKE ? OR k.context_text LIKE ?) AND k.status = 'active'
   `;
@@ -773,6 +774,7 @@ function formatL1Result(row, score = null) {
   };
   if (row.status !== undefined) res.status = row.status;
   if (row.consolidated_into !== undefined) res.consolidated_into = row.consolidated_into;
+  if (row.is_synthesized !== undefined) res.is_synthesized = row.is_synthesized;
   if (score !== null && score !== undefined) {
     res.score = Number(Number(score).toFixed(6));
   }
@@ -957,13 +959,15 @@ export function listRecent(options = {}) {
   const cleanTags = rawTags.map(t => String(t).trim().toLowerCase()).filter(Boolean);
 
   let sql = `
-    SELECT id, title, category, project, tags, summary, related_files, time_created, status, consolidated_into
+    SELECT id, title, category, project, tags, summary, related_files, time_created, status, consolidated_into, is_synthesized
     FROM knowledge_items 
     WHERE 1=1
   `;
   const params = [];
 
-  if (status !== 'all') {
+  if (options.synthesizedOnly || status === 'l4') {
+    sql += ` AND is_synthesized = 1`;
+  } else if (status !== 'all') {
     sql += ` AND status = ?`;
     params.push(status);
   }
