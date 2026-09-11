@@ -278,24 +278,31 @@ export function findBySessionCategoryTopic(sessionId, category, fingerprint, pro
 export function recordKnowledge(params) {
   const db = getDatabase();
 
-  // 1. 参数清洗与分类解析 (归一化收敛至三大分类)
-  const rawCategory = String(params.category || 'learnings').trim().toLowerCase();
-  const category = normalizeCategory(rawCategory);
+  // 1. 参数清洗与分类解析 (归一化收敛至三大分类，全面兼容全中文参数)
+  const rawTitle = params['标题'] || params.title || '未命名知识';
+  const rawCategory = String(params['分类'] || params.category || 'learnings').trim().toLowerCase();
+  const rawTags = params['标签'] || params.tags;
+  const rawSolution = params['正文'] || params['正文内容'] || params.content || params.solution || params.implementation || '';
+  const rawContext = params['背景'] || params.context || params.context_text || '';
+  const rawProject = params['项目'] || params['项目归属'] || params.project;
 
-  const title = scrubSecrets(params.title || '未命名知识');
-  const tags = Array.isArray(params.tags) 
-    ? params.tags.map(t => scrubSecrets(String(t).trim().toLowerCase())) 
+  const category = normalizeCategory(rawCategory);
+  const title = scrubSecrets(rawTitle);
+  const tags = Array.isArray(rawTags) 
+    ? rawTags.map(t => scrubSecrets(String(t).trim().toLowerCase())) 
     : [];
   
-  const contextText = scrubSecrets(params.context || params.context_text || '');
+  const contextText = scrubSecrets(rawContext);
   const symptom = scrubSecrets(params.symptom || '');
   const rootCause = scrubSecrets(params.root_cause || params.rationale || '');
-  const solution = scrubSecrets(params.solution || params.implementation || '');
-  const relatedFiles = Array.isArray(params.related_files) ? params.related_files : [];
+  const solution = scrubSecrets(rawSolution);
+  const relatedFiles = Array.isArray(params.related_files || params['关联代码']) 
+    ? (params.related_files || params['关联代码']) 
+    : [];
   
   // 提取 100 字以内精简 summary（L1 摘要）与 solution_core
   const summary = scrubSecrets(
-    params.summary || 
+    params['极简摘要'] || params.summary || 
     (contextText ? `【背景】${contextText.slice(0, 50)}... ` : '') + (symptom ? symptom.slice(0, 70) : solution.slice(0, 70)) || 
     '无详细摘要'
   );
@@ -333,9 +340,9 @@ export function recordKnowledge(params) {
   const extraPayloadStr = JSON.stringify(extraPayloadObj);
 
   // 2. 上下文推导 (优先使用显式指定的 project，并经过 normalizeProjectName 防腐归一)
-  const context = resolveSessionContext(params.session_id, params.project_path);
-  const rawProject = params.project ? scrubSecrets(params.project.trim()) : context.projectName;
-  const projectName = normalizeProjectName(rawProject);
+  const context = resolveSessionContext(params.session_id || params['会话ID'], params.project_path);
+  const rawProjectVal = rawProject ? scrubSecrets(String(rawProject).trim()) : context.projectName;
+  const projectName = normalizeProjectName(rawProjectVal);
   const now = Date.now();
 
   // 2.5 计算主题指纹（同 session 同分类同主题覆盖定位；不同主题互不误覆盖）
@@ -434,15 +441,40 @@ export function recordKnowledge(params) {
   }
 
   const cardId = generateCardId();
+  const isSynthesized = params.is_synthesized === 1 || params.is_synthesized === true;
 
-  // 4. 版本演进支持：如果声明了 supersedes，将旧版本标记为 superseded
+  // 4. 版本演进与做梦熔炼支持：如果声明了 supersedes
+  let supersededIds = [];
   if (params.supersedes) {
-    const updateOld = db.prepare(`
-      UPDATE knowledge_items 
-      SET status = 'superseded', superseded_by = ?, time_updated = ?
-      WHERE id = ?
-    `);
-    updateOld.run(cardId, now, params.supersedes);
+    if (Array.isArray(params.supersedes)) {
+      supersededIds = params.supersedes.map(s => String(s).trim()).filter(Boolean);
+    } else {
+      supersededIds = String(params.supersedes).split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
+    }
+  }
+
+  if (supersededIds.length > 0) {
+    if (isSynthesized || supersededIds.length > 1) {
+      // 多卡做梦熔炼场景：旧卡片标记为 consolidated，并记录 consolidated_into = cardId
+      const placeholders = supersededIds.map(() => '?').join(',');
+      try {
+        db.prepare(`
+          UPDATE knowledge_items 
+          SET status = 'consolidated', consolidated_into = ?, time_updated = ?
+          WHERE id IN (${placeholders})
+        `).run(cardId, now, ...supersededIds);
+      } catch (e) {}
+    } else {
+      // 单卡普通演化替代场景
+      try {
+        const updateOld = db.prepare(`
+          UPDATE knowledge_items 
+          SET status = 'superseded', superseded_by = ?, time_updated = ?
+          WHERE id = ?
+        `);
+        updateOld.run(cardId, now, supersededIds[0]);
+      } catch (e) {}
+    }
   }
 
   // 5. 写入核心实体表 (knowledge_items)
@@ -510,6 +542,13 @@ export function recordKnowledge(params) {
         updated_at = excluded.updated_at
     `).run(cardId, serializeVector(vec), VECTOR_DIMENSIONS, now);
   } catch (e) {}
+
+  // 8. 若为多卡做梦熔炼或声明了 is_synthesized，标记 is_synthesized = 1
+  if (isSynthesized || supersededIds.length > 1) {
+    try {
+      db.prepare(`UPDATE knowledge_items SET is_synthesized = 1 WHERE id = ?`).run(cardId);
+    } catch (e) {}
+  }
 
   return {
     success: true,
@@ -779,7 +818,13 @@ export function getKnowledge(id) {
     ''
   ];
 
-  if (cat === 'learnings') {
+  // 若正文本身已是高质量完整 Markdown（包含一级或二级标题或大段自由叙述），直接原汁原味呈现
+  const fullBody = item.code_payload || item.solution_core || '';
+  const isRichMarkdown = fullBody.includes('# ') || fullBody.includes('## ') || fullBody.length > 300;
+
+  if (isRichMarkdown) {
+    lines.push(fullBody);
+  } else if (cat === 'learnings') {
     lines.push(
       '## 🎯 业务操作背景 (Context)',
       item.context_text || item.summary || '无详细业务操作背景',
@@ -849,16 +894,16 @@ export function getKnowledge(id) {
       item.context_text || item.summary || '无详细场景描述',
       '',
       '## 📦 前置依赖与运行环境 (Prerequisites)',
-      extra.prerequisites || '标准运行环境',
+      extra.prerequisites || '详见正文说明',
       '',
       '## ⚙️ 核心交互时序与机制 (Mechanism & Flow)',
-      extra.mechanism || '标准设计实现',
+      extra.mechanism || '详见正文实现',
       '',
       '## 💻 生产级完整参考实现代码 (Implementation)',
       item.code_payload || item.solution_core || '无详细实现',
       '',
       '## ⚠️ 适用边界与反模式 (Boundaries & Anti-Patterns)',
-      extra.boundaries || '请结合业务场景评估',
+      extra.boundaries || '详见正文约束',
       '',
       '## 🧪 自测验证与压测用例 (Verification)',
       extra.verification || '已通过功能与单元测试'

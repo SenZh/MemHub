@@ -81,6 +81,7 @@ export function getDreamCandidateItems(options = {}) {
   const db = getDatabase();
   const project = options.project || null;
   const now = Date.now();
+  const force = options.force === true;
 
   let sql = `
     SELECT 
@@ -91,9 +92,12 @@ export function getDreamCandidateItems(options = {}) {
     LEFT JOIN knowledge_embeddings e ON k.id = e.id
     WHERE k.status = 'active'
       AND (k.is_synthesized IS NULL OR k.is_synthesized = 0)
-      AND (k.dream_skip_until IS NULL OR k.dream_skip_until <= ?)
   `;
-  const params = [now];
+  const params = [];
+  if (!force) {
+    sql += ` AND (k.dream_skip_until IS NULL OR k.dream_skip_until <= ?)`;
+    params.push(now);
+  }
 
   if (project) {
     sql += ` AND (k.project = ? OR k.project = 'global')`;
@@ -203,7 +207,7 @@ export function clusterCandidateItems(items = [], options = {}) {
           if (past) alreadyAttempted = true;
         } catch {}
 
-        if (!alreadyAttempted) {
+        if (!alreadyAttempted || options.force === true) {
           clusters.push({
             project: proj,
             fingerprint,

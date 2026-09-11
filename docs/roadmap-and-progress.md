@@ -1,8 +1,8 @@
 # MemHub 目标差距分析与工程演进计划书 (Roadmap & Progress)
 
-> **版本定位**：v0.1.5 手动删除记忆与三表级联原子清理发布版 (Manual Deletion & Cascade Atomic Purge Release)  
+> **版本定位**：v0.1.6 记忆抽取全中文纯净化与去八股文自由 Markdown 重构发布版 (Pure Chinese & Freeform Markdown Memory Distillation Release)  
 > **项目定位**：面向 AI Coding Agent 的工程长效记忆与暗知识调度中枢（Unified Memory & Knowledge Hub）  
-> **更新基准**：2026-09-10
+> **更新基准**：2026-09-11
 
 ---
 
@@ -11,16 +11,16 @@
 对照项目的最终设计愿景（`requirements-and-boundaries.md` 与 `architecture-design.md`），我们对当前已落地工程资产进行了**地毯式核对与差距分析（Gap Analysis）**：
 
 | 架构分层 / 功能模块 | 设计终态目标 (Vision) | 当前实现状态 (Status) | 达成度 |
-| :--- | :--- | :--- | :---: |
+| :--- | :--- | :--- | :--- |
 | **1. 存储内核与事务安全** | 单文件 SQLite 物理分层 + DDL自愈热迁移 + VACUUM INTO 热备 + Markdown 导出 | 已完整实现（`src/storage.js`），支持物理列扩展、老库 DDL 自愈、查重防线与冷备 | **100%** |
 | **2. 极简动宾 MCP 协议** | `memhub_*` 极简动宾契约（memhub_search/get/save/recent）两阶段渐进披露 | 已完整实现（`src/index.js`），两阶段防爆 Token，且完全向下兼容老别名 | **100%** |
-| **3. 四大基石分类与结构要素** | 收敛为四大正交顶级分类（learnings/decisions/patterns/business），各具备专属要素结构 | 已完整实现（`src/config.js`、`src/storage.js`），彻底补全业务背景与排错误区 | **100%** |
+| **3. 全中文业务分类与轻量结构化** | 终结学术八股，回归真实业务视角三大支柱（排错避坑/业务知识/架构决策），轻量检索元数据 + 自由高密度 Markdown 正文 | 已完整实现（`src/config.js`、`src/storage.js`、`src/index.js`），彻底废除 15 个生硬英文字段，杜绝模板空洞套话 | **100%** |
 | **4. 存储层 Upsert 原地覆盖与多卡** | 同 session 同主题多次抽取原地 UPDATE 覆盖，不同主题/分类沉淀为多张卡 | 已完整实现（`src/storage.js`），引入 `topic_fingerprint` 列与权威 `session_tracking` | **100%** |
 | **5. 过滤引擎与配置体系** | 动态静默时间阈值 + watchDirectories / include / exclude 路径正则规则 | 已完整实现（`src/path-filter.js`、`src/config.js`），防时序踩踏与特殊字符转义 | **100%** |
 | **6. 后台常驻定时提炼守护 (P0)** | `memhub daemon` 常驻自循环，通过 OpenCode HTTP 驱动宿主 LLM 抽取 | 已完整打透（`src/daemon.js`、`src/host/opencode-client.js`）：动态端口与鉴权 + 7天窗口/120分静默 + 权威排除所有 Subagent 子会话 + **fork 副本抽取（原会话零污染，抽完即删）** + **每轮配置热重载** + 严禁假卡 | **100%** |
 | **7. 废除离线启发式造假 (P0)** | 彻底清除硬编码关键词捏造假卡，只允许真实 LLM 分析沉淀高质量资产 | 已彻底重构（`src/pipeline/extractor.js`）：废除死模板，保留 Truth Gate 物理成功证据门禁与 LLM 结果解析 | **100%** |
 | **8. 混合检索与向量融合层 (P1)** | SQLite FTS5 Trigram + 本地 384 维稠密向量 + RRF 倒数排名融合 | 已完整实现（`src/search/vector-engine.js`、`src/search/rrf.js`、`src/storage.js`）：双路并行召回 + 60 平滑因子 RRF 融合 + 词汇鸿沟语义泛化 + LIKE 优雅兜底 | **100%** |
-| **9. 离线做梦与记忆熔炼 (P1 - 顶层热点)** | 极简 Cron 触发闲时做梦（Dreaming）：碎片三维聚类、宿主 LLM 反思 Prompt、防重状态机、L4 升华层落盘与碎片封存 | Phase 1 & 2 端到端已完整打通（Prompt 模板、执行流水线、supersedes 溯源链、consolidated 封存流转）；**Cron 已真正生效（标准 5 段式 + 区间命中检测，修复轮询相位错位）**，单测 100% 覆盖 | **100%** |
+| **9. 离线做梦与记忆熔炼 (P1 - 顶层热点)** | 极简 Cron 触发闲时做梦（Dreaming）：碎片三维聚类、宿主 LLM 反思 Prompt、防重状态机、L4 升华层落盘与碎片封存 | Phase 1 & 2 端到端已完整打通；**实测多轮真实做梦升华**；**做梦提示词防降维升级，支持自由 Markdown 正文与单测继承**；WebUI 大盘交互穿透与台账弹窗全就绪 | **100%** |
 | **10. 认知读协议与触发规约增强 (P0)** | 强化 MCP 工具描述与读协议诱导，解决 LLM 不知何时读、怎么读、能做什么 | 已完整实现（`src/index.js`），注入 4 大触发门禁与动态分支指引，单测验证通过 | **100%** |
 | **11. 研发态势与项目资产大盘 (P1)** | `memhub stats` 全局/项目研发态势与按 Project 维度分类资产大盘总结 | 已完整实现（`src/storage.js`、`src/cli.js`），支持 ASCII 可视化、`--json` 输出与**做梦引擎成效透视（L4 升华/封存碎片/熔炼轮次/候选池）** | **100%** |
 | **12. MCP 工具调用审计日志 (P0)** | 端到端捕获 MCP 工具调用流水、查询关键词、命中条数与耗时，CLI `memhub audit` 检索 | 已完整实现（`mcp_audit_logs` 表、AOP 切面、`memhub audit` 命令），单测全覆盖 | **100%** |
@@ -28,8 +28,9 @@
 | **14. 动态知识地图注入 (P2)** | `memhub map` 自动生成当前项目 `<500 tokens` 的 `AGENTS.md` 知识地图节 | 评估识别痛点（开局任务未知），调整优先级至 v0.2.x 探索 | **0%** |
 | **15. Cursor 深度穿透 (P2)** | 穿透 `%APPDATA%/Cursor/.../state.vscdb` 读取 `composerData` 时序流 | 接口骨架与插槽已就绪（`src/adapters/cursor.js`），底层解析逻辑暂未填入（按既定策略延后） | **20%** |
 | **16. 会话零污染抽取与 Cron 调度增强 (P0)** | fork 副本抽取避免污染原会话排序/缓存；daemon 配置热重载；dream cron 真正按表达式触发 | 已完整实现：`fork`→抽取→轮询完成→`finally` 删除的闭环 + `(fork #N)` 防套娃拦截 + 每轮热重载 + 标准 5 段式 Cron 引擎与区间命中检测，实测与 15 套件单测全绿 | **100%** |
-| **17. 轻量 WebUI 看板与内置 HTTP 服务 (P0)** | 0 外部重型依赖原生 HTTP 服务 + 单文件 SPA 看板（态势大盘、知识全景两阶段展开、混合检索实验室、MCP 审计流水、一键热备与导出）+ 安全沙箱与 CSRF 门禁 | 已完整实现（`src/server/index.js`, `src/server/public/index.html`, `tests/test-web-server.js`），支持 `memhub ui` 独立拉起与 `memhub daemon --ui` 伴生脱机隔离运行，15 套件全绿 | **100%** |
+| **17. 轻量 WebUI 看板与内置 HTTP 服务 (P0)** | 0 外部重型依赖原生 HTTP 服务 + 单文件 SPA 看板（态势大盘、知识全景两阶段展开、混合检索实验室、MCP 审计流水、一键热备与导出）+ 安全沙箱与 CSRF 门禁 | 已完整实现（`src/server/index.js`, `src/server/public/index.html`, `tests/test-web-server.js`），支持做梦大盘一键穿透与审计台账流水弹窗（`/api/dream/history`），15 套件全绿 | **100%** |
 | **18. 手动删除记忆与三表级联原子清理 (P0)** | 存储层原生 BEGIN IMMEDIATE 排他事务级联清理三表 + DELETE/POST 路由 CSRF 门禁 + WebUI 动态标题防误触二次确认与跨视图即时 DOM 移除 + CLI memhub delete/rm | 已完整实现（`src/storage.js`, `src/server/index.js`, `src/server/public/index.html`, `src/cli.js`, `tests/test-deletion.js`），实现 0 幽灵召回，15 套件全绿 | **100%** |
+| **19. 记忆抽取提示词提纯与去八股重构 (P0)** | 彻底砸碎十几个碎字段死板限制，引入纯中文“轻量检索元数据 + 自由高密度 Markdown 正文”契约，杜绝“标准环境/结合业务评估”假占位符 | 已完整实现：提示词重构 + 真实会话三版本盲测选优 + 存储层全中文双轨映射 + 彻底剔除底层硬编码套话，15 套件全绿 | **100%** |
 
 ---
 

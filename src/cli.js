@@ -25,7 +25,7 @@ import {
   showDaemonLogs 
 } from './daemon.js';
 import { startWebServer } from './server/index.js';
-import { MEMHUB_HOME, VAULT_DIR, BACKUP_DIR, DB_PATH } from './config.js';
+import { MEMHUB_HOME, VAULT_DIR, BACKUP_DIR, DB_PATH, getConfig } from './config.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -424,21 +424,25 @@ switch (command) {
   }
 
   case 'dream': {
+    const defaultAffinity = getConfig().dream?.minAffinity ?? 0.40;
     let project = null;
     let dryRun = false;
     let jsonMode = false;
-    let limit = 100;
-    let minAffinity = 0.55;
+    let force = false;
+    let batchLimit = 2;
+    let minAffinity = defaultAffinity;
 
     for (let i = 1; i < args.length; i++) {
       if (args[i] === '--dry-run') {
         dryRun = true;
       } else if (args[i] === '--json') {
         jsonMode = true;
+      } else if (args[i] === '--force') {
+        force = true;
       } else if (args[i] === '--project' && args[i + 1]) {
         project = args[++i];
       } else if (args[i] === '--limit' && args[i + 1]) {
-        limit = parseInt(args[++i], 10);
+        batchLimit = parseInt(args[++i], 10);
       } else if (args[i] === '--affinity' && args[i + 1]) {
         minAffinity = parseFloat(args[++i]);
       } else if (!args[i].startsWith('-') && !project) {
@@ -446,8 +450,8 @@ switch (command) {
       }
     }
 
-    const candidates = getDreamCandidateItems({ project, limit });
-    const clusters = clusterCandidateItems(candidates, { minAffinity });
+    const candidates = getDreamCandidateItems({ project, limit: 100, force });
+    const clusters = clusterCandidateItems(candidates, { minAffinity, force });
 
     if (jsonMode) {
       console.log(JSON.stringify({
@@ -467,7 +471,7 @@ switch (command) {
 
     if (clusters.length === 0) {
       console.log(`\n  ℹ️ 当前知识库碎片相关度较分散，暂未形成满足条件的做梦主题簇。`);
-      console.log(`  建议继续日常编码积累长效资产，或使用 --affinity 0.40 调宽初筛阈值。`);
+      console.log(`  建议继续日常编码积累长效资产，或使用 --affinity 0.35 调宽初筛阈值。`);
     } else {
       console.log(`\n【📦 候选做梦主题簇预览 (Dream Clusters)】:`);
       clusters.forEach((cl, idx) => {
@@ -484,11 +488,31 @@ switch (command) {
     } else {
       console.log(`\n🚀 正在启动做梦执行管道，尝试借宿主 LLM 执行深度反思与熔炼...`);
       try {
-        const pipeRes = await runDreamPipeline({ project, minAffinity, dryRun: false });
+        const pipeRes = await runDreamPipeline({
+          project,
+          minAffinity,
+          dryRun: false,
+          force,
+          limit: batchLimit,
+          onProgress: (phase, data) => {
+            if (phase === 'start') {
+              console.log(`\n  👉 正在熔炼主题簇 [${data.project}] (${data.card_ids.length} 张碎片)...`);
+            } else if (phase === 'waiting') {
+              console.log(`     ⏳ 等待宿主 LLM 架构师深度反思中... (${Math.round(data.waitedMs / 1000)}s)`);
+            } else if (phase === 'done') {
+              console.log(`     ✅ 升华成功！新 L4 规约卡: ${data.synthesized_id} (落地方式: ${data.via})`);
+            } else if (phase === 'rejected') {
+              console.log(`     ⚠️ 宿主 LLM 判定场景特异放弃熔炼，已置入冷却期。`);
+            }
+          }
+        });
         if (pipeRes.skipped_reason) {
           console.log(`  ℹ️ ${pipeRes.skipped_reason}`);
+        } else if (pipeRes.processed > 0) {
+          console.log(`\n  🎉 做梦熔炼圆满完成！共升华 ${pipeRes.processed} 个高阶规约，成功封存 ${pipeRes.consolidated} 张原始碎片。`);
+          console.log(`  可通过 'memhub stats' 或 WebUI 查看最新认知资产大盘。`);
         } else {
-          console.log(`  ✅ 成功派发 ${pipeRes.processed} 个主题簇进行深度熔炼！`);
+          console.log(`  ℹ️ 本轮未产生新的规约落盘。`);
         }
       } catch (e) {
         console.error(`  ❌ 做梦流水线异常: ${e.message}`);

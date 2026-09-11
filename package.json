@@ -1,6 +1,6 @@
 {
   "name": "memhub",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "type": "module",
   "description": "The unified knowledge & memory hub for AI coding agents",
   "bin": {

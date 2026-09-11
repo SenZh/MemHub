@@ -46,76 +46,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
         category: {
           type: 'string',
-          enum: ['learnings', 'decisions', 'patterns', 'business'],
-          description: '【必须】四大分类之一: learnings(排错避坑因果链), decisions(架构决策ADR/红线), patterns(最佳实践/可复用代码配置模板), business(业务领域知识与隐性潜规则)'
+          description: '【必须】三大核心分类之一: 排错避坑(learnings), 架构决策(decisions), 业务知识(business)'
         },
         tags: {
           type: 'array',
           items: { type: 'string' },
-          description: '【必须】客观技术实体关键词列表(自动小写)，如: ["redis", "redisson", "docker", "alpine"]'
+          description: '【必须】客观技术实体关键词列表(自动小写)，如: ["redis", "redisson", "docker"]'
         },
-        context: {
+        content: {
           type: 'string',
-          description: '【必须】业务背景与触发动作：说明在进行什么业务操作、何种环境版本、或者什么痛点驱动下发生的'
+          description: '【必须】纯 Markdown 自由技术正文。严禁八股文！连贯阐述业务背景、核心证据/堆栈、验证通过的真实完整代码片段与防踩坑底线'
         },
         solution: {
           type: 'string',
-          description: '【必须】经过验证的完整正解（可复用的配置变更、核心修复代码片段、标准模板代码）'
+          description: '【兼容别名】同 content，经过验证的完整正解代码或正文内容'
         },
-        symptom: {
+        context: {
           type: 'string',
-          description: '[learnings专用] 现象与具体报错信息（包含真实错误堆栈字面量、异常类签名）'
-        },
-        root_cause: {
-          type: 'string',
-          description: '[learnings/decisions专用] 深入技术根因因果链剖析，或架构决策核心裁决理由'
-        },
-        ineffective_attempts: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '[learnings专用] 已排除的误区与无效尝试清单（防止后人重蹈覆辙）'
-        },
-        prevention: {
-          type: 'string',
-          description: '[learnings专用] 验证自测手段与防复发门禁（如加了什么单测、配了什么监控报警）'
-        },
-        impact: {
-          type: 'string',
-          description: '[decisions专用] 受影响拓扑面、改动类与关联数据表清单'
-        },
-        alternatives: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '[decisions专用] 评估过的备选方案及放弃理由（Why Not X?）'
-        },
-        migration: {
-          type: 'string',
-          description: '[decisions专用] 新老数据平滑迁移方案与回滚降级策略'
-        },
-        guardrails: {
-          type: 'array',
-          items: { type: 'string' },
-          description: '[decisions专用] 不可触碰的架构红线与硬约束'
-        },
-        prerequisites: {
-          type: 'string',
-          description: '[patterns专用] 前置运行环境依赖、版本矩阵与中间件要求'
-        },
-        mechanism: {
-          type: 'string',
-          description: '[patterns专用] 核心交互时序、数据流向与执行机制'
-        },
-        boundaries: {
-          type: 'string',
-          description: '[patterns专用] 适用边界与反模式（什么时候坚决别用）'
-        },
-        verification: {
-          type: 'string',
-          description: '[patterns专用] 自测验证与并发压测用例代码'
+          description: '【可选】业务背景与触发痛点'
         },
         project: {
           type: 'string',
-          description: '所属工作区/项目名。默认自动推导当前工作区；若属于全公司跨项目通用的最佳实践或避坑，显式填 "global"'
+          description: '所属工作区/项目名。默认自动推导当前工作区；若属于全公司跨项目通用的经验，显式填 "global"'
         },
         related_files: {
           type: 'array',
@@ -131,7 +83,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           description: '可选：若本次沉淀是对某张历史卡片的演进或推翻，填入被替代的旧卡片 ID (如 kb-xxxx)'
         }
       },
-      required: ['title', 'category', 'tags', 'context', 'solution']
+      required: ['title', 'category', 'tags']
     }
   };
 

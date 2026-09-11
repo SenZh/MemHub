@@ -381,29 +381,47 @@ export async function pickIdleSession(baseUrl, opts = {}) {
 export function buildExtractionPrompt(opts = {}) {
   const sessionId = opts.targetSessionId || '当前会话';
   const projectConstraint = opts.projectName 
-    ? `\n   - 【严格所属项目约束】：调用 memhub_save 时，project 字段必须严格填 "${opts.projectName}"，严禁擅自修改或添加前后缀！`
+    ? `\n   - 【所属项目】：必须准确填写 "${opts.projectName}"！`
     : '';
   return [
-    `【MemHub 自动化工程记忆提炼任务】`,
-    `请全面复盘本会话发生的真实代码修改、排错过程或架构权衡决策，提炼出可供团队跨会话长期复用的工程暗知识资产。`,
+    `【MemHub 自动化工程暗知识与长效记忆沉淀】`,
+    `你的任务是全面复盘当前会话，榨取出可供团队跨项目、跨会话长期复用的【高密度工程硬核知识】。`,
+    `必须是对未来的系统演进、线上排错、业务迭代具有确凿指导价值的干货！`,
+    `若本会话仅为临时性任务进度、简单查询、日常答疑或未定位根因的尝试，直接回复 "无需沉淀"，绝对禁止存入无长期复用价值的流水账！`,
     ``,
-    `【硬性门禁与执行规约】（这是后台静默分析任务，严禁修改业务代码或新建无关文件）：`,
-    `1. 【无价值坚决不沉淀】：`,
-    `   - 若本会话仅为简单查询、文件浏览、日常闲聊、未经验证的代码改动或未定位根因的失败尝试，请直接回复"无需沉淀"，【绝对不要】调用 memhub_save！`,
-    `2. 【物理终态成功证据门禁 (Truth Gate)】：`,
-    `   - 只有具备明确物理终态成功证据（例如测试用例通过、编译构建成功、运行时服务正常启动、或报错已彻底排查并验证修复）的内容才允许沉淀。未验证的猜测一律禁止入库！`,
-    `3. 【多卡独立抽取】：`,
-    `   - 若本会话同时包含两类或以上的独立有价值主题（例如既成功排查定位了复杂 Bug，又沉淀了新的架构选型决策 ADR），请务必拆分为多张独立的记忆卡片，分别单独调用 memhub_save！`,
-    `4. 【四大基石分类与规范标题】：`,
-    `   - category 必须是以下四者之一：`,
-    `     * learnings: 排错避坑因果链（必须包含 symptom、root_cause、solution、ineffective_attempts）`,
-    `     * decisions: 架构决策与设计权衡 ADR（必须包含 context、solution、guardrails、alternatives）`,
-    `     * patterns: 验证通过的可复用代码配置模板（必须包含 context、solution、boundaries）`,
-    `     * business: 业务领域暗知识与隐性潜规则（必须包含 context[业务域]、solution[业务口径与计算规则]、guardrails[业务资损与防踩坑红线]、mechanism[状态机流转时序]）`,
-    `   - title 格式严格遵守：[技术栈/模块] 核心场景/症状 -> 最终结论/正解 (25-45字，必须含具体实体名，如: [Docker/Alpine] glibc缺失致canvas崩溃 -> 改用debian-slim或加libc6-compat)。`,
-    `5. 【防重与覆盖机制】：`,
-    `   - 调用 memhub_save 时，务必传入 session_id="${sessionId}"。${projectConstraint}`,
-    `   - 若可能，传入简明小写的 topic_fingerprint（如 "docker-alpine-glibc"），系统将自动执行原地更新覆盖，防止重复落库。`
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `一、三大核心资产分类（按开发痛点精准归类，必须三选一）：`,
+    `• 排错避坑 (learnings)：线上或本地深层 Bug 根治记录。目的：当后人遇到相同或类似报错时，秒出真实根因与治本代码，绝不踩同一个坑；`,
+    `• 业务知识 (business)：业务模块架构、状态机跃迁、计算口径与防资损红线。目的：讲透业务模块的真实流转机制与底层限制，防止改错业务引发灾难；`,
+    `• 架构决策 (decisions)：重大技术选型、系统重构、为什么选A放弃B (ADR)。目的：立字为据，说明架构权衡代价，锁定不可触碰的技术死线。`,
+    ``,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `二、正文撰写规范（连贯 Markdown 自由展开，直击技术实质，严禁八股套话）：`,
+    `正文不设死板表单，但必须包含以下四项长效知识硬核要素（由事实自然驱动，严禁出现“标准环境”、“结合业务评估”等敷衍废话）：`,
+    `1. 业务场景与技术背景：指明在哪个具体业务模块、何种技术环境下遇到的核心阻碍或架构诉求；`,
+    `2. 真实事实证据与深度机理：`,
+    `   - 【排错】：截取关键行的真实报错日志堆栈、底层代码调用链与破案推导；`,
+    `   - 【业务】：画出清晰的状态机跃迁时序、不可逆分支或业务计算硬口径；`,
+    `   - 【架构】：列出方案 A 与方案 B 的关键分歧与取舍代价。`,
+    `3. 验证通过的治本方案：生产级可运行的代码前后对比（强烈建议使用 \`\`\`diff 或标准代码块）、精简配置或定案 SQL（严禁只写一半的伪代码）；`,
+    `4. 防踩坑底线与推翻的误区：`,
+    `   - 记录排查中已推翻的假假设（防止后人再走弯路）；`,
+    `   - 明确指出维护该模块绝对禁止触碰的技术红线或业务资损底线。`,
+    ``,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `三、标题规格（必须是 20-40 字的一句话技术暗知识指纹）：`,
+    `格式固定为：[业务模块/核心技术] 触发诱因或场景 -> 架构结论或正解 (严禁句号，直奔主题)`,
+    `❌ 错误反例: [ProductService/多语言] 硬编码大写Default查utf8mb4_bin库致Banner图片URL全空 -> 统一小写default(Constants.DEFAULT_LANGUAGE) (103字，把正文堆进标题)`,
+    `✅ 正确标杆: [ProductService/多语言] 排序规则utf8mb4_bin致素材URL为空 -> 统一小写default常量 (43字，干脆利落)`,
+    ``,
+    `四、落盘保存规约：`,
+    `1. 若具备沉淀价值，必须调用 memhub_save 工具进行保存，参数规范：`,
+    `   - title: [模块/技术] 诱因 -> 结论 (20-40字)`,
+    `   - category: 排错避坑 | 业务知识 | 架构决策`,
+    `   - tags: [核心技术标签1, 业务模块标签2]`,
+    `   - content: 自由展开、有事实证据、有代码对比、有避坑底线的高密度 Markdown 正文`,
+    `   - session_id: "${sessionId}"${projectConstraint}`,
+    `2. 若本会话同时包含两类或以上独立有价值的主题，务必拆分为多张独立的记忆卡片分别保存。`
   ].join('\n');
 }
 
@@ -637,6 +655,73 @@ export async function dispatchExtractionPrompt(baseUrl, opts = {}) {
     payload.posted = res.ok;
     payload.httpStatus = res.status;
     return payload;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * 创建全新的独立临时会话（如用于 AI 做梦反思任务）。
+ * @param {string} baseUrl
+ * @param {Object} opts { title, directory, timeoutMs }
+ * @returns {Promise<Object>} 创建的会话对象 (含 id, title, directory)
+ */
+export async function createSession(baseUrl, opts = {}) {
+  const auth = basicAuthHeader();
+  const headers = { 'content-type': 'application/json' };
+  if (auth) headers.Authorization = auth;
+
+  const body = {
+    title: opts.title || 'MemHub Task',
+    directory: opts.directory || process.cwd()
+  };
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), opts.timeoutMs || 15000);
+  try {
+    const res = await fetch(`${baseUrl}/session`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+    if (!res.ok) throw new Error(`创建独立会话失败 HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * 向指定会话派发通用提示词。
+ * @param {string} baseUrl
+ * @param {string} sessionId
+ * @param {string} promptText
+ * @param {Object} opts { timeoutMs }
+ * @returns {Promise<{ok:boolean, status:number}>}
+ */
+export async function dispatchSessionPrompt(baseUrl, sessionId, promptText, opts = {}) {
+  if (!sessionId) throw new Error('dispatchSessionPrompt: 缺少必须的 sessionId');
+  const auth = basicAuthHeader();
+  const headers = { 'content-type': 'application/json' };
+  if (auth) headers.Authorization = auth;
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), opts.timeoutMs || 20000);
+  try {
+    const res = await fetch(`${baseUrl}/session/${encodeURIComponent(sessionId)}/prompt_async`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        noReply: false,
+        parts: [{ type: 'text', text: promptText }]
+      }),
+      signal: ctrl.signal
+    });
+    clearTimeout(t);
+    if (!res.ok) throw new Error(`向会话派发提示词失败 HTTP ${res.status}`);
+    return { ok: true, status: res.status };
   } finally {
     clearTimeout(t);
   }

@@ -13,7 +13,8 @@ const {
   applyDreamConsolidation, 
   consolidateSourceFragments,
   recordDreamHistory,
-  runDreamPipeline 
+  runDreamPipeline,
+  parseSynthesizedCard
 } = await import('../src/dream/pipeline.js');
 
 test('MemHub 做梦提炼执行管道与状态机流转 (Dream Pipeline)', async (t) => {
@@ -115,6 +116,74 @@ test('MemHub 做梦提炼执行管道与状态机流转 (Dream Pipeline)', async
     // 此时碎片已被 consolidated 封存，候选池应无满足条件的碎片
     const summary = await runDreamPipeline({ project: 'dream-pipe-proj', dryRun: true });
     assert.equal(summary.clusters_found, 0);
+  });
+
+  await t.test('5. 验证 parseSynthesizedCard 智能反思解析器', () => {
+    // 5.1 放弃熔炼识别
+    const rejText = "经深入分析，两张卡片分别属于移动端与网关不同物理层级，场景特异，放弃熔炼。";
+    const resRej = parseSynthesizedCard(rejText);
+    assert.equal(resRej.rejected, true);
+
+    // 5.2 标准 ```json 代码块提取
+    const validJsonText = `
+经过复盘，两张碎片可以提炼为通用规范：
+\`\`\`json
+{
+  "title": "[Redis/Lock] 分布式锁续期与防死锁标准规范",
+  "category": "patterns",
+  "tags": ["redis", "lock"],
+  "context": "生产高并发死锁治理总结",
+  "solution": "使用 Redisson 看门狗机制加续期锁",
+  "guardrails": ["严禁无超时时间死等"]
+}
+\`\`\`
+请遵守上述规范。
+    `;
+    const resValid = parseSynthesizedCard(validJsonText);
+    assert.equal(resValid.rejected, false);
+    assert.equal(resValid.card.title, '[Redis/Lock] 分布式锁续期与防死锁标准规范');
+    assert.equal(resValid.card.category, 'patterns');
+    assert.deepEqual(resValid.card.tags, ['redis', 'lock']);
+  });
+
+  await t.test('6. 验证 recordKnowledge 多卡 supersedes 原生闭环支持', () => {
+    const f1 = recordKnowledge({
+      title: '[DB/Shard] 分库分表读写分离配置',
+      category: 'patterns',
+      tags: ['db'],
+      context: '分库上下文',
+      solution: '解法1',
+      project: 'db-proj'
+    });
+    const f2 = recordKnowledge({
+      title: '[DB/Shard] 强制走主库注解避坑',
+      category: 'learnings',
+      tags: ['db'],
+      context: '主库注解上下文',
+      solution: '解法2',
+      project: 'db-proj'
+    });
+
+    // 模拟宿主通过 MCP 直接调用 memhub_save 传入逗号分隔的 supersedes
+    const l4 = recordKnowledge({
+      title: '[DB/Shard] 数据库读写分离与主库强制路由权威指南',
+      category: 'patterns',
+      tags: ['db', 'sharding'],
+      context: '熔炼',
+      solution: '统一注解与配置模板',
+      supersedes: `${f1.id}, ${f2.id}`
+    });
+
+    const db = getDatabase();
+    const row1 = db.prepare('SELECT status, consolidated_into FROM knowledge_items WHERE id = ?').get(f1.id);
+    const row2 = db.prepare('SELECT status, consolidated_into FROM knowledge_items WHERE id = ?').get(f2.id);
+    const rowL4 = db.prepare('SELECT is_synthesized FROM knowledge_items WHERE id = ?').get(l4.id);
+
+    assert.equal(row1.status, 'consolidated');
+    assert.equal(row1.consolidated_into, l4.id);
+    assert.equal(row2.status, 'consolidated');
+    assert.equal(row2.consolidated_into, l4.id);
+    assert.equal(rowL4.is_synthesized, 1);
   });
 
   t.after(() => {

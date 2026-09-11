@@ -43,21 +43,38 @@ export function normalizeCategory(rawCategory) {
   if (!rawCategory || typeof rawCategory !== 'string') return 'learnings';
   const lower = rawCategory.trim().toLowerCase();
   
-  if (lower === 'solutions' || lower === 'solution' || lower === 'patterns' || lower === 'pattern' || lower === 'guide') {
-    return 'patterns';
-  }
-  if (lower === 'gotchas' || lower === 'gotcha' || lower === 'pitfall' || lower === 'pitfalls' || lower === 'troubleshoot' || lower === 'learnings' || lower === 'learning') {
+  // 1. 排错避坑类 (learnings)
+  if (
+    lower === 'learnings' || lower === 'learning' || lower === 'gotchas' || lower === 'gotcha' || 
+    lower === 'pitfall' || lower === 'pitfalls' || lower === 'troubleshoot' ||
+    lower === '排错避坑' || lower === '排错' || lower === '避坑' || lower === '故障' || lower === '踩坑'
+  ) {
     return 'learnings';
   }
-  if (lower === 'decisions' || lower === 'decision' || lower === 'adr') {
+  
+  // 2. 架构决策类 (decisions)
+  if (
+    lower === 'decisions' || lower === 'decision' || lower === 'adr' ||
+    lower === '架构决策' || lower === '架构' || lower === '决策' || lower === '架构方案'
+  ) {
     return 'decisions';
   }
+
+  // 3. 业务知识类 (business)
   if (
     lower === 'business' || lower === 'biz' || lower === 'business_rule' || lower === 'business_rules' ||
     lower === 'business-rule' || lower === 'business-rules' || lower === 'domain' || lower === 'rule' ||
-    lower === 'rules' || lower === '业务' || lower === '业务知识' || lower === '业务规则'
+    lower === 'rules' || lower === '业务' || lower === '业务知识' || lower === '业务规则' || lower === '业务模块'
   ) {
     return 'business';
+  }
+
+  // 4. 最佳实践与模板类 (patterns)
+  if (
+    lower === 'solutions' || lower === 'solution' || lower === 'patterns' || lower === 'pattern' || 
+    lower === 'guide' || lower === '模板' || lower === '最佳实践' || lower === '代码模板' || lower === '工程实践'
+  ) {
+    return 'patterns';
   }
   
   // 严格安全收敛：未识别的非法枚举统一兜底为 learnings，杜绝脏数据入库
@@ -83,7 +100,7 @@ export function normalizeProjectName(rawProject) {
   if (lower === 'memhub' || lower === 'mem-hub' || lower === 'memory-hub' || lower === 'exobrain') {
     return 'MemHub';
   }
-  if (lower === 'global' || lower === 'all' || lower === 'common') {
+  if (lower === 'global' || lower === 'all' || lower === 'common' || lower === '全局通用' || lower === '全局') {
     return 'global';
   }
 
@@ -118,7 +135,7 @@ export function getConfig(projectPath = process.cwd()) {
       enabled: true,
       cron: '0 3 * * *',          // 定时触发表达式 (默认每天凌晨 3:00 执行)
       intervalMinutes: 1440,      // 简易间隔兜底 (默认 24 小时)
-      minAffinity: 0.55,          // 连通聚类亲和度阈值 (0.0~1.0)
+      minAffinity: 0.40,          // 连通聚类亲和度阈值 (0.0~1.0，0.40 能自然发现同模块高相关碎片簇)
       maxClusterSize: 5           // 单个主题簇最大卡片数量
     }
   };

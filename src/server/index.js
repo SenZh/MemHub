@@ -328,6 +328,25 @@ export function createWebServer() {
           });
         }
 
+        // 5.1 GET /api/dream/history - 做梦自省审计流水
+        if (method === 'GET' && pathname === '/api/dream/history') {
+          const db = getDatabase();
+          let rows = [];
+          try {
+            rows = db.prepare(`SELECT * FROM knowledge_dream_history ORDER BY created_at DESC LIMIT 50`).all();
+          } catch (e) {}
+          return sendJson(req, res, 200, {
+            success: true,
+            data: {
+              history: rows.map(r => ({
+                ...r,
+                source_ids: (() => { try { return JSON.parse(r.source_ids); } catch { return []; } })()
+              })),
+              total: rows.length
+            }
+          });
+        }
+
         // 6. POST /api/ops/:action - 运维控制台（CSRF 门禁防御）
         if (method === 'POST' && pathname.startsWith('/api/ops/')) {
           const action = pathname.replace('/api/ops/', '').trim();

@@ -326,11 +326,13 @@ export function runDaemonForeground(cliOptions = {}) {
       lastDreamDate = dateKey;
       dreamCronCache.lastRunTs = Date.now();
       if (dreamRes.processed > 0) {
-        console.log(`   ✅ 做梦成功派发 ${dreamRes.processed} 个碎片簇进行高阶熔炼`);
+        console.log(`   ✅ 做梦成功熔炼 ${dreamRes.processed} 个碎片簇，封存 ${dreamRes.consolidated} 张历史碎片入 L4 认知层`);
       } else if (dreamRes.clusters_found === 0) {
         console.log(`   ℹ️ 当前无可做梦的碎片簇，跳过本轮`);
+      } else if (dreamRes.skipped_reason) {
+        console.log(`   ℹ️ 做梦跳过: ${dreamRes.skipped_reason}`);
       } else {
-        console.log(`   ℹ️ 做梦本轮未派发（候选 ${dreamRes.total_candidates}，簇 ${dreamRes.clusters_found}）`);
+        console.log(`   ℹ️ 做梦本轮未产生熔炼（候选 ${dreamRes.total_candidates}，簇 ${dreamRes.clusters_found}）`);
       }
     } catch (de) {
       console.warn(`   ⚠️ 做梦流水线异常: ${de.message}`);

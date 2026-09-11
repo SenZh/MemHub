@@ -100,13 +100,16 @@
           <div class="mt-1 text-xs text-slate-400">经真实工程事实检验的沉淀</div>
         </div>
 
-        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:shadow transition">
+        <div onclick="filterByL4Cards()" class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:shadow hover:border-purple-300 hover:bg-purple-50/20 cursor-pointer transition" title="点击在资产大纲中仅查看 L4 认知规约">
           <div class="flex items-center justify-between text-slate-500 text-xs font-medium">
             <span>做梦熔炼 L4 升华</span>
             <span class="text-base">✨</span>
           </div>
-          <div class="mt-2 text-2xl font-bold tracking-tight text-emerald-600" id="stat-l4-count">-</div>
-          <div class="mt-1 text-xs text-slate-400">多碎片凝聚的高维认知架构</div>
+          <div class="mt-2 text-2xl font-bold tracking-tight text-purple-600" id="stat-l4-count">-</div>
+          <div class="mt-1 text-xs text-slate-400 flex items-center justify-between">
+            <span>多碎片凝聚的高阶认知规约</span>
+            <span class="text-[10px] text-purple-600 font-mono">查看 ↗</span>
+          </div>
         </div>
 
         <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:shadow transition">
@@ -154,20 +157,32 @@
               <span class="text-xs px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">Cron 调度</span>
             </h3>
             <div class="grid grid-cols-2 gap-3 mb-4">
-              <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <div class="text-xs text-slate-500">已封存碎片</div>
+              <div onclick="filterByDreamStatus('consolidated')" class="bg-slate-50 hover:bg-indigo-50/70 p-3 rounded-lg border border-slate-200 hover:border-indigo-300 cursor-pointer transition" title="点击查看所有被做梦熔炼封存的原始历史碎片">
+                <div class="text-xs text-slate-500 flex items-center justify-between">
+                  <span>已封存碎片</span>
+                  <span class="text-[10px] text-indigo-600 font-mono">明细 ↗</span>
+                </div>
                 <div class="text-lg font-bold text-slate-800 mt-1" id="dream-archived">-</div>
               </div>
-              <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <div class="text-xs text-slate-500">碎片封存率</div>
+              <div onclick="filterByDreamStatus('consolidated')" class="bg-slate-50 hover:bg-emerald-50/70 p-3 rounded-lg border border-slate-200 hover:border-emerald-300 cursor-pointer transition" title="点击查看已封存碎片">
+                <div class="text-xs text-slate-500 flex items-center justify-between">
+                  <span>碎片封存率</span>
+                  <span class="text-[10px] text-emerald-600 font-mono">占比 ↗</span>
+                </div>
                 <div class="text-lg font-bold text-emerald-600 mt-1" id="dream-ratio">-</div>
               </div>
-              <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <div class="text-xs text-slate-500">熔炼总轮次</div>
+              <div onclick="openDreamHistoryModal()" class="bg-slate-50 hover:bg-blue-50/70 p-3 rounded-lg border border-slate-200 hover:border-blue-300 cursor-pointer transition" title="点击打开做梦自省审计台账流水窗口">
+                <div class="text-xs text-slate-500 flex items-center justify-between">
+                  <span>熔炼总轮次</span>
+                  <span class="text-[10px] text-blue-600 font-mono">台账 ↗</span>
+                </div>
                 <div class="text-lg font-bold text-blue-600 mt-1" id="dream-rounds">-</div>
               </div>
-              <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <div class="text-xs text-slate-500">聚类候选碎片池</div>
+              <div onclick="filterByDreamStatus('active')" class="bg-slate-50 hover:bg-amber-50/70 p-3 rounded-lg border border-slate-200 hover:border-amber-300 cursor-pointer transition" title="点击查看当前活跃在库、待做梦聚类的碎片池">
+                <div class="text-xs text-slate-500 flex items-center justify-between">
+                  <span>聚类候选碎片池</span>
+                  <span class="text-[10px] text-amber-600 font-mono">明细 ↗</span>
+                </div>
                 <div class="text-lg font-bold text-amber-600 mt-1" id="dream-pool">-</div>
               </div>
             </div>
@@ -402,6 +417,30 @@
     </div>
   </div>
 
+  <!-- 做梦自省审计台账流水 Modal -->
+  <div id="dream-history-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full max-h-[85vh] shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/70">
+        <div class="flex items-center space-x-2">
+          <span class="text-base">🌙</span>
+          <h3 class="text-sm font-bold text-slate-800">离线做梦与认知熔炼审计台账 (Dreaming History)</h3>
+        </div>
+        <button onclick="closeDreamHistoryModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-md transition text-sm cursor-pointer">✕</button>
+      </div>
+      <div class="p-6 overflow-y-auto space-y-4">
+        <p class="text-xs text-slate-500">
+          记录每次基于多维亲和度初筛、宿主 LLM 反思自省与状态机落盘的不可篡改审计凭证。
+        </p>
+        <div id="dream-history-list" class="space-y-3">
+          <!-- 动态注入 -->
+        </div>
+      </div>
+      <div class="px-6 py-3 border-t border-slate-200 bg-slate-50 flex justify-end">
+        <button onclick="closeDreamHistoryModal()" class="px-4 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-medium transition cursor-pointer">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentTab = 'dashboard';
     let currentCategoryFilter = '';
@@ -567,14 +606,109 @@
     }
 
     // 状态 Badge 样式生成
-    function getStatusBadge(status) {
+    function getStatusBadge(item) {
+      const status = typeof item === 'object' ? item.status : item;
+      const isSynthesized = typeof item === 'object' && (item.is_synthesized === 1 || item.is_synthesized === true);
+      let badge = '';
+      if (isSynthesized) {
+        badge += `<span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-300 font-semibold shadow-2xs">✨ L4 认知规约</span> `;
+      }
       if (status === 'consolidated') {
-        return `<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium">🔄 已做梦熔炼</span>`;
+        const into = item.consolidated_into ? ` → ${item.consolidated_into}` : '';
+        return badge + `<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium">🔄 已熔炼${into}</span>`;
       }
       if (status === 'superseded') {
-        return `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">⚠️ 已迭代废弃</span>`;
+        return badge + `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">⚠️ 已迭代废弃</span>`;
       }
-      return `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">🟢 有效</span>`;
+      return badge + `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">🟢 有效</span>`;
+    }
+
+    // 从大盘一键穿透做梦状态筛选
+    function filterByDreamStatus(status) {
+      switchTab('explorer');
+      const sel = document.getElementById('filter-status');
+      if (sel) sel.value = status;
+      document.getElementById('filter-project').value = '';
+      document.getElementById('filter-tag').value = '';
+      currentCategoryFilter = '';
+      document.querySelectorAll('.cat-pill').forEach((btn, idx) => {
+        btn.className = idx === 0 ? 'cat-pill active px-3 py-1 rounded-full text-xs font-medium border border-emerald-400 bg-emerald-50 text-emerald-800' : 'cat-pill px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300';
+      });
+      loadKnowledge();
+    }
+
+    // 从大盘一键查看 L4 认知规约卡片
+    function filterByL4Cards() {
+      switchTab('explorer');
+      const sel = document.getElementById('filter-status');
+      if (sel) sel.value = 'all';
+      document.getElementById('filter-project').value = '';
+      document.getElementById('filter-tag').value = '';
+      currentCategoryFilter = '';
+      document.querySelectorAll('.cat-pill').forEach((btn, idx) => {
+        btn.className = idx === 0 ? 'cat-pill active px-3 py-1 rounded-full text-xs font-medium border border-emerald-400 bg-emerald-50 text-emerald-800' : 'cat-pill px-3 py-1 rounded-full text-xs font-medium border border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300';
+      });
+      loadKnowledge();
+    }
+
+    // 打开做梦自省审计台账流水窗口
+    async function openDreamHistoryModal() {
+      const modal = document.getElementById('dream-history-modal');
+      const listContainer = document.getElementById('dream-history-list');
+      listContainer.innerHTML = '<div class="text-xs text-slate-400 py-4 text-center">正在加载审计台账...</div>';
+      modal.classList.remove('hidden');
+
+      try {
+        const res = await fetch('/api/dream/history');
+        const json = await res.json();
+        if (!json.success) {
+          listContainer.innerHTML = `<div class="text-xs text-rose-500 py-4 text-center">加载失败: ${json.error}</div>`;
+          return;
+        }
+
+        const list = json.data.history || [];
+        if (list.length === 0) {
+          listContainer.innerHTML = '<div class="text-xs text-slate-400 py-8 text-center border border-dashed border-slate-200 rounded-xl">暂无做梦审计台账记录</div>';
+          return;
+        }
+
+        listContainer.innerHTML = '';
+        list.forEach((item, idx) => {
+          const dt = new Date(item.created_at).toLocaleString('zh-CN', { hour12: false });
+          const sources = Array.isArray(item.source_ids) ? item.source_ids : [];
+          const sourcesHtml = sources.map(id => `<button onclick="closeDreamHistoryModal(); openDetail('${id}')" class="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[11px] border border-slate-200 transition cursor-pointer">${id}</button>`).join(' ');
+          const targetHtml = item.synthesized_id ? `<button onclick="closeDreamHistoryModal(); openDetail('${item.synthesized_id}')" class="px-2 py-0.5 rounded bg-purple-100 hover:bg-purple-200 text-purple-900 font-mono text-[11px] font-semibold border border-purple-300 transition cursor-pointer">${item.synthesized_id}</button>` : '<span class="text-slate-400">无</span>';
+          
+          listContainer.innerHTML += `
+            <div class="bg-slate-50/60 border border-slate-200 rounded-xl p-4 space-y-2">
+              <div class="flex items-center justify-between text-xs">
+                <div class="flex items-center space-x-2">
+                  <span class="font-bold text-slate-800">第 ${list.length - idx} 轮做梦自省</span>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold ${item.outcome === 'CONSOLIDATED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">${item.outcome}</span>
+                </div>
+                <span class="text-[11px] text-slate-400 font-mono">${dt}</span>
+              </div>
+              <div class="text-xs text-slate-600 flex items-center space-x-2">
+                <span class="text-slate-400 font-medium">生成 L4 规约:</span>
+                ${targetHtml}
+              </div>
+              <div class="text-xs text-slate-600 flex items-center space-x-2 flex-wrap gap-y-1">
+                <span class="text-slate-400 font-medium">熔炼历史碎片 (${sources.length}篇):</span>
+                ${sourcesHtml}
+              </div>
+              <div class="text-[10px] text-slate-400 font-mono pt-1">
+                指纹: ${item.cluster_fingerprint}
+              </div>
+            </div>
+          `;
+        });
+      } catch (e) {
+        listContainer.innerHTML = `<div class="text-xs text-rose-500 py-4 text-center">拉取做梦历史失败: ${e.message}</div>`;
+      }
+    }
+
+    function closeDreamHistoryModal() {
+      document.getElementById('dream-history-modal').classList.add('hidden');
     }
 
     // 加载知识全景列表
@@ -613,7 +747,7 @@
                 <div class="flex items-center space-x-2 flex-wrap gap-y-1">
                   ${getCategoryBadge(item.category)}
                   <span class="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-mono border border-slate-200 font-medium">${item.project || 'global'}</span>
-                  ${getStatusBadge(item.status)}
+                  ${getStatusBadge(item)}
                   <span class="text-xs font-mono text-slate-400">${item.id}</span>
                 </div>
                 <span class="text-[11px] text-slate-400 font-mono whitespace-nowrap">${dateStr}</span>
