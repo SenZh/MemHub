@@ -26,6 +26,7 @@ import {
 } from './daemon.js';
 import { startWebServer } from './server/index.js';
 import { MEMHUB_HOME, VAULT_DIR, BACKUP_DIR, DB_PATH, getConfig } from './config.js';
+import { EXTRACTION_PROMPT_V9_FULL_TEXT } from './prompt-template.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -37,6 +38,7 @@ function printHelp() {
 MemHub (memhub / mem-hub) CLI - AI 编程知识中枢与工程长效记忆
 
 用法:
+  memhub save / prompt         查看长效记忆提炼提示词规范全文与执行守则 (必须按此要求提炼)
   memhub scan [数量]           离线扫描超过静默时间未活跃的历史 Session 跟踪状态
   memhub daemon [start|stop|status|logs]  后台常驻定时提炼守护服务 (默认后台运行)
   memhub search / find <词>    全文/混合检索历史避坑经验与决策 (支持 --project, --category, --tag)
@@ -45,12 +47,12 @@ MemHub (memhub / mem-hub) CLI - AI 编程知识中枢与工程长效记忆
   memhub list [选项]           查看最近沉淀的知识列表 (支持 --limit, --project, --category, --tag)
   memhub stats [选项]          查看全局/项目研发态势与项目维度分类大盘 (支持 --json, --project)
   memhub audit [条数]          查看 MCP 工具调用审计流水 (支持 --tool <name>, --json)
-  memhub dream [选项]          执行做梦引擎离线记忆熔炼与碎片聚类 (支持 --dry-run, --project, --affinity)
   memhub backup [路径]         执行 SQLite 原生 VACUUM INTO 无损原子热备份
   memhub export [目录]         将 SQLite 数据库无损导出为结构化 Markdown 目录树 (Obsidian兼容)
   memhub embed                 全量/增量为已有知识计算 384 维语义向量并持久化
   memhub ui / web [选项]       启动内置 HTTP 服务并打开 WebUI 可视化外脑看板
   memhub path                  打印知识库物理路径与数据库位置
+  memhub dream [选项]          [已禁用] 执行做梦引擎离线记忆熔炼与碎片聚类
 
 daemon 守护指令:
   memhub daemon                默认后台静默启动守护进程
@@ -79,6 +81,43 @@ ui / web 可选参数:
 }
 
 switch (command) {
+  case 'help': {
+    if (args[1] === 'save' || args[1] === 'prompt') {
+      console.log(`\n================================================================================`);
+      console.log(`【MemHub 统一长效记忆提炼执行规约 (v9 标准)】`);
+      console.log(`⚠️  重要约定：保存工程记忆 (memhub_save) 时，必须严格按照以下提示词规约进行提炼！`);
+      console.log(`================================================================================\n`);
+      console.log(EXTRACTION_PROMPT_V9_FULL_TEXT);
+      console.log(`\n================================================================================`);
+      console.log(`⚠️  必须严格遵守：`);
+      console.log(`  1. 正文必须按固定五段式【目标】【背景】【方案】【结论】【经验】组织；`);
+      console.log(`  2. 第一铁律：只记真实事实，严禁编造推断，必须涵盖读写修改过的关键文件与代码；`);
+      console.log(`  3. 严禁流水账过程痕迹（commit hash、用例数、逐步流水），保留可执行细节；`);
+      console.log(`  4. 单会话单卡，无价值直接回复'无需沉淀'，严禁凑数调用！`);
+      console.log(`================================================================================\n`);
+      break;
+    }
+    printHelp();
+    break;
+  }
+
+  case 'save':
+  case 'prompt': {
+    console.log(`\n================================================================================`);
+    console.log(`【MemHub 统一长效记忆提炼执行规约 (v9 标准)】`);
+    console.log(`⚠️  重要约定：保存工程记忆 (memhub_save) 时，必须严格按照以下提示词规约进行提炼！`);
+    console.log(`================================================================================\n`);
+    console.log(EXTRACTION_PROMPT_V9_FULL_TEXT);
+    console.log(`\n================================================================================`);
+    console.log(`⚠️  必须严格遵守：`);
+    console.log(`  1. 正文必须按固定五段式【目标】【背景】【方案】【结论】【经验】组织；`);
+    console.log(`  2. 第一铁律：只记真实事实，严禁编造推断，必须涵盖读写修改过的关键文件与代码；`);
+    console.log(`  3. 严禁流水账过程痕迹（commit hash、用例数、逐步流水），保留可执行细节；`);
+    console.log(`  4. 单会话单卡，无价值直接回复'无需沉淀'，严禁凑数调用！`);
+    console.log(`================================================================================\n`);
+    break;
+  }
+
   case 'scan': {
     const limit = parseInt(args[1], 10) || 2;
     console.log(`🔍 开始扫描历史已结束（静默完成态）的 OpenCode 会话...`);
@@ -424,7 +463,14 @@ switch (command) {
   }
 
   case 'dream': {
-    const defaultAffinity = getConfig().dream?.minAffinity ?? 0.40;
+    const liveCfg = getConfig();
+    const isExplicitTest = args.includes('--dry-run') || args.includes('--json') || args.includes('--force');
+    if (liveCfg.dream?.enabled !== true && !isExplicitTest) {
+      console.log(`\nℹ️ [MemHub] Dreaming (离线做梦与记忆熔炼) 功能当前已禁用（设计尚未收敛成熟）。`);
+      console.log(`   如需临时执行测试，可添加 --force 参数强制体验，或在配置中将 dream.enabled 设为 true。\n`);
+      break;
+    }
+    const defaultAffinity = liveCfg.dream?.minAffinity ?? 0.40;
     let project = null;
     let dryRun = false;
     let jsonMode = false;

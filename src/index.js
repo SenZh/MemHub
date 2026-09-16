@@ -19,6 +19,7 @@ import {
   getStats,
   logMcpAccess
 } from './storage.js';
+import { getMemhubSaveToolDescription } from './prompt-template.js';
 
 const server = new Server(
   {
@@ -36,13 +37,13 @@ const server = new Server(
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   const memhubSaveTool = {
     name: 'memhub_save',
-    description: '【主动长效记忆沉淀】当攻克了排错避坑(learnings)、做出关键架构决策(decisions)、或沉淀出最佳实践模板(patterns)时调用。必须包含业务操作背景(context)与验证通过的解决方案(solution)。支持前置查重与版本替换。严禁记录未经验证的猜测。',
+    description: getMemhubSaveToolDescription(),
     inputSchema: {
       type: 'object',
       properties: {
         title: {
           type: 'string',
-          description: '【L1索引标题】格式严格遵守: [技术栈/模块] 核心场景/症状 -> 最终结论/正解 (25-45字，必须含具体实体名，如: [Docker/Alpine] glibc缺失致canvas加载崩溃 -> 改用debian-slim或加libc6-compat)'
+          description: '【L1索引标题】格式严格遵守: [业务模块/核心主题] 核心知识与结论 (20-45字)。像一条可检索的知识索引，让后人一眼看出记录了什么问题与结论，直奔主题，严禁句号与动作套话（如不要写 \'-> 源码实证\'）'
         },
         category: {
           type: 'string',
@@ -51,15 +52,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         tags: {
           type: 'array',
           items: { type: 'string' },
-          description: '【必须】客观技术实体关键词列表(自动小写)，如: ["redis", "redisson", "docker"]'
+          description: '【必须】客观技术实体与概念关键词列表(3-6个，英文自动小写，中文保留原样)。只能从三类选取：1.业务模块/系统名；2.客观技术栈/中间件/表名；3.核心业务概念。严禁工具词、流程词、动作泛词'
         },
         content: {
           type: 'string',
-          description: '【必须】纯 Markdown 自由技术正文。严禁八股文！连贯阐述业务背景、核心证据/堆栈、验证通过的真实完整代码片段与防踩坑底线'
+          description: '【必须】高密度 Markdown 正文，必须严格按固定五段式组织：【目标】【背景】【方案】【结论】【经验】。事实优先，严禁编造，去过程水分（严禁 commit hash、用例数、逐步流水），保留可执行细节（具体路径、精确配置/SQL片段）'
         },
         solution: {
           type: 'string',
-          description: '【兼容别名】同 content，经过验证的完整正解代码或正文内容'
+          description: '【兼容别名】同 content，经过验证的完整正解代码或五段式正文内容'
         },
         context: {
           type: 'string',
@@ -72,7 +73,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         related_files: {
           type: 'array',
           items: { type: 'string' },
-          description: '涉及的核心代码或配置文件相对路径列表'
+          description: '【可选】只列承载本卡核心知识的 1-5 个核心文件相对路径列表；没有则传空数组 []，不影响正常沉淀'
         },
         session_id: {
           type: 'string',

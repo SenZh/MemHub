@@ -135,9 +135,9 @@ export function getConfig(projectPath = process.cwd()) {
       cooldownMinutes: 10,
       opencodeUrl: null
     },
-    // AI 做梦自省与认知熔炼 dream 配置块（极简 Cron 定时驱动）
+    // AI 做梦自省与认知熔炼 dream 配置块（当前默认禁用，待后续成熟再行规划）
     dream: {
-      enabled: true,
+      enabled: false,
       cron: '0 3 * * *',          // 定时触发表达式 (默认每天凌晨 3:00 执行)
       intervalMinutes: 1440,      // 简易间隔兜底 (默认 24 小时)
       minAffinity: 0.40,          // 连通聚类亲和度阈值 (0.0~1.0，0.40 能自然发现同模块高相关碎片簇)
