@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import './sandbox-bootstrap.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { 

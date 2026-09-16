@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import './sandbox-bootstrap.js';
 import http from 'node:http';
 import { execSync } from 'node:child_process';
 import { 

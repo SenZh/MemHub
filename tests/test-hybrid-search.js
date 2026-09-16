@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import './sandbox-bootstrap.js';
 import { embedText, cosineSimilarity, VECTOR_DIMENSIONS } from '../src/search/vector-engine.js';
 import { fuseRankings } from '../src/search/rrf.js';
 import { recordKnowledge, searchKnowledge, getDatabase } from '../src/storage.js';
