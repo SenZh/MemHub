@@ -61,9 +61,10 @@ console.log('4. 验证端到端混合检索 (解决同义词与词汇鸿沟)...'
 const testProject = 'hybrid-test-' + Date.now();
 
 // 写入一条使用正式术语的知识卡片（标题与内容不包含口语词"掉单"）
+// 注：当前阶段 storage 层强制 category='default'（去分类化），传入值会被覆盖
 recordKnowledge({
   title: '[Webhook/支付] 第三方支付回调丢包补偿机制与超时重试幂等正解',
-  category: 'patterns',
+  category: 'default',
   project: testProject,
   tags: ['webhook', 'payment', 'retry', 'idempotent'],
   context: '接收第三方支付通道回调通知的高可靠异步处理',
@@ -87,8 +88,15 @@ console.log('5. 验证项目命名空间与标签硬过滤在混合检索中绝�
 const isolatedHits = searchKnowledge('webhook payment', { project: 'completely-other-project' });
 assert(isolatedHits.filter(h => h.project === testProject).length === 0, '跨项目隔离严禁泄漏');
 
-const categoryFiltered = searchKnowledge('webhook payment', { project: testProject, category: 'learnings' });
-assert(categoryFiltered.length === 0, '分类限定 learnings 时不应召回 patterns 卡片');
+const categoryFiltered = searchKnowledge('webhook payment', { project: testProject, category: 'default' });
+assert(categoryFiltered.some(h => h.id && h.project === testProject), '分类限定 default 时应召回本项目卡片');
+
+// 用不存在的分类过滤：本项目的卡绝不应被召回（注意 global 卡可穿透，故只断言本项目卡）
+const categoryMismatch = searchKnowledge('webhook payment', { project: testProject, category: 'patterns' });
+assert(
+  categoryMismatch.filter(h => h.project === testProject).length === 0,
+  '分类限定 patterns 时不应召回本项目的 default 卡片'
+);
 
 console.log('   ✅ 混合检索元数据过滤断言通过');
 

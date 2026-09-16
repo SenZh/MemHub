@@ -32,16 +32,21 @@ export const DB_PATH = path.join(MEMHUB_HOME, 'memory.db');
 export const VAULT_DIR = path.join(MEMHUB_HOME, 'vault');
 export const BACKUP_DIR = path.join(MEMHUB_HOME, 'backups');
 
-export const DEFAULT_CATEGORIES = ['learnings', 'decisions', 'patterns', 'business'];
+export const DEFAULT_CATEGORIES = ['default', 'learnings', 'decisions', 'patterns', 'business'];
 
 /**
  * 分类别名归一化映射
  * 保证历史别名与近义词（如 solutions -> patterns, pitfall -> learnings, rules -> business）平滑归一
- * 非法分类统一收敛为默认顶级分类 'learnings'
+ * 非法分类统一收敛为默认分类 'default'
  */
 export function normalizeCategory(rawCategory) {
-  if (!rawCategory || typeof rawCategory !== 'string') return 'learnings';
+  if (!rawCategory || typeof rawCategory !== 'string') return 'default';
   const lower = rawCategory.trim().toLowerCase();
+
+  // 0. 默认分类（去分类化：不再强制模型三选一，统一落 default）
+  if (lower === 'default' || lower === '默认' || lower === '通用') {
+    return 'default';
+  }
   
   // 1. 排错避坑类 (learnings)
   if (
@@ -77,8 +82,8 @@ export function normalizeCategory(rawCategory) {
     return 'patterns';
   }
   
-  // 严格安全收敛：未识别的非法枚举统一兜底为 learnings，杜绝脏数据入库
-  return 'learnings';
+  // 严格安全收敛：未识别的非法枚举统一兜底为 default，杜绝脏数据入库
+  return 'default';
 }
 
 /**

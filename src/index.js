@@ -46,7 +46,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
         category: {
           type: 'string',
-          description: '【必须】三大核心分类之一: 排错避坑(learnings), 架构决策(decisions), 业务知识(business)'
+          description: '【可选】分类。当前阶段代码层强制落 default（去分类化），传入其他值也会被覆盖为 default'
         },
         tags: {
           type: 'array',
@@ -118,8 +118,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
         category: {
           type: 'string',
-          enum: ['learnings', 'decisions', 'patterns', 'business'],
-          description: '可选：限定分类（learnings=排错, decisions=架构决策, patterns=代码模板, business=业务潜规则）'
+          enum: ['default', 'learnings', 'decisions', 'patterns', 'business'],
+          description: '可选：限定分类（default=默认, learnings=排错, decisions=架构决策, patterns=代码模板, business=业务潜规则）'
         },
         limit: {
           type: 'number',

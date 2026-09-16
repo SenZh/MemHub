@@ -134,7 +134,9 @@ console.log('4. buildExtractionPrompt 生成规范沉淀指令...');
 const prompt = buildExtractionPrompt({ targetSessionId: 'ses-abc' });
 assert(prompt.includes('ses-abc'), '应包含目标 session_id');
 assert(prompt.includes('memhub_save'), '应指引宿主调用 memhub_save');
-assert(prompt.includes('learnings'), '应包含分类 learnings');
+assert(prompt.includes('default'), '应要求分类固定填 default（去分类化）');
+assert(prompt.includes('一个会话 = 一张卡') || prompt.includes('一张卡'), '应包含一 session 一卡约束');
+assert(prompt.includes('严禁编造'), '应包含禁止编造铁律');
 assert(prompt.includes('无需沉淀'), '应包含无需沉淀门禁');
 console.log('   ✅ 指令内容完整');
 

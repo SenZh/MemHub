@@ -318,7 +318,7 @@ switch (command) {
     console.log(`【作用范围】: ${stats.project}`);
     console.log(`【长效资产】: ${stats.total_knowledge_entries} 篇 (估算规避试错节省 ~${stats.estimated_saved_tokens.toLocaleString()} tokens)`);
     
-    console.log(`\n【📂 四大基石分类分布】:`);
+    console.log(`\n【📂 分类分布】:`);
     if (stats.categories.length === 0) {
       console.log(`  (暂无分类数据)`);
     } else {
@@ -338,7 +338,7 @@ switch (command) {
       stats.projects.forEach(p => {
         const barLen = Math.max(1, Math.round((p.total / maxProjCount) * 12));
         const bar = '█'.repeat(barLen).padEnd(12);
-        console.log(`  • ${p.project.padEnd(18)} [${bar}] 总计: ${String(p.total).padStart(2)} 篇 (排错: ${p.learnings}, 决策: ${p.decisions}, 模式: ${p.patterns}, 业务: ${p.business})`);
+        console.log(`  • ${p.project.padEnd(18)} [${bar}] 总计: ${String(p.total).padStart(2)} 篇 (默认: ${p.default}, 排错: ${p.learnings}, 决策: ${p.decisions}, 模式: ${p.patterns}, 业务: ${p.business})`);
       });
     }
 

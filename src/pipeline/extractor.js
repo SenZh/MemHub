@@ -128,7 +128,7 @@ export class KnowledgeExtractor {
    * 清洗并规范化 LLM 提炼出的单张卡片
    */
   static _sanitizeCard(raw, session = {}) {
-    const category = normalizeCategory(raw.category || 'learnings');
+    const category = normalizeCategory(raw.category || 'default');
     return {
       title: String(raw.title || '').trim(),
       category,

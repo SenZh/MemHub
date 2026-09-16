@@ -63,13 +63,12 @@ test('MemHub Stats 研发态势与按 Project 资产分布大盘', async (t) => 
     const alpha = globalStats.projects.find(p => p.project === 'project-alpha');
     assert.ok(alpha);
     assert.equal(alpha.total, 2);
-    assert.equal(alpha.learnings, 1);
-    assert.equal(alpha.decisions, 1);
+    assert.equal(alpha.default, 2, '去分类化后全部落 default');
 
     const beta = globalStats.projects.find(p => p.project === 'project-beta');
     assert.ok(beta);
     assert.equal(beta.total, 1);
-    assert.equal(beta.decisions, 1);
+    assert.equal(beta.default, 1, '去分类化后全部落 default');
 
     // 2) 指定 project 过滤查询验证
     const filteredStats = getStats({ project: 'project-alpha' });

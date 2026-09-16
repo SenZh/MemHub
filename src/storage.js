@@ -278,15 +278,18 @@ export function findBySessionCategoryTopic(sessionId, category, fingerprint, pro
 export function recordKnowledge(params) {
   const db = getDatabase();
 
-  // 1. 参数清洗与分类解析 (归一化收敛至三大分类，全面兼容全中文参数)
+  // 1. 参数清洗与分类解析
+  //    【去分类化】当前阶段不再由模型判定分类，一律强制落 'default'。
+  //    模型常无视提示词仍传 learnings/business/decisions，故在代码层强制覆盖。
   const rawTitle = params['标题'] || params.title || '未命名知识';
-  const rawCategory = String(params['分类'] || params.category || 'learnings').trim().toLowerCase();
+  const rawCategory = String(params['分类'] || params.category || 'default').trim().toLowerCase();
   const rawTags = params['标签'] || params.tags;
   const rawSolution = params['正文'] || params['正文内容'] || params.content || params.solution || params.implementation || '';
   const rawContext = params['背景'] || params.context || params.context_text || '';
   const rawProject = params['项目'] || params['项目归属'] || params.project;
 
-  const category = normalizeCategory(rawCategory);
+  const FORCE_DEFAULT_CATEGORY = true;
+  const category = FORCE_DEFAULT_CATEGORY ? 'default' : normalizeCategory(rawCategory);
   const title = scrubSecrets(rawTitle);
   const tags = Array.isArray(rawTags) 
     ? rawTags.map(t => scrubSecrets(String(t).trim().toLowerCase())) 
@@ -821,8 +824,9 @@ export function getKnowledge(id) {
   ];
 
   // 若正文本身已是高质量完整 Markdown（包含一级或二级标题或大段自由叙述），直接原汁原味呈现
+  // default（去分类化默认分类）一律原样输出：其正文本身即完整五段式 Markdown，不套用旧分类模板
   const fullBody = item.code_payload || item.solution_core || '';
-  const isRichMarkdown = fullBody.includes('# ') || fullBody.includes('## ') || fullBody.length > 300;
+  const isRichMarkdown = cat === 'default' || fullBody.includes('# ') || fullBody.includes('## ') || fullBody.length > 300;
 
   if (isRichMarkdown) {
     lines.push(fullBody);
@@ -1105,6 +1109,7 @@ export function getStats(options = {}) {
       projectMap.set(pName, {
         project: pName,
         total: 0,
+        default: 0,
         learnings: 0,
         decisions: 0,
         patterns: 0,
@@ -1113,7 +1118,8 @@ export function getStats(options = {}) {
     }
     const pStat = projectMap.get(pName);
     pStat.total += row.count;
-    if (row.category === 'learnings') pStat.learnings += row.count;
+    if (row.category === 'default') pStat.default += row.count;
+    else if (row.category === 'learnings') pStat.learnings += row.count;
     else if (row.category === 'decisions') pStat.decisions += row.count;
     else if (row.category === 'patterns') pStat.patterns += row.count;
     else if (row.category === 'business') pStat.business += row.count;

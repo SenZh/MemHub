@@ -38,7 +38,7 @@ export function buildDreamPrompt(cluster) {
     `   - 同时，必须在回复末尾附带一个标准的 JSON 代码块（\`\`\`json ... \`\`\`），以便离线管道校验与双轨落盘：`,
     `     {`,
     `       "title": "[技术栈/模块] 核心场景 -> 架构结论或终极正解 (20-40字)",`,
-    `       "category": "排错避坑 | 业务知识 | 架构决策",`,
+    `       "category": "default",`,
     `       "project": "${cluster.project}",`,
     `       "tags": ["核心技术标签1", "模块标签2"],`,
     `       "content": "自由连贯、包含业务背景、深度技术因果推导、完整可运行代码前后对比、排错推翻的假假设与防踩坑硬红线的高密度 Markdown 正文",`,
