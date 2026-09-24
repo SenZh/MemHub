@@ -13,6 +13,8 @@
   "scripts": {
     "start": "node src/index.js",
     "test": "node tests/e2e.js",
+    "test:host": "node tests/test-host-client.js",
+    "test:host:v2": "node tests/test-host-client-v2.js",
     "test:storage": "node tests/test-storage.js",
     "test:adapters": "node tests/test-adapters.js",
     "test:extractor": "node tests/test-extractor.js",

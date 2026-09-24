@@ -9,6 +9,7 @@ import {
   listCandidateSessions, 
   dispatchExtractionPrompt,
   forkSession,
+  snapshotForkBaseline,
   waitForSessionIdle,
   deleteSession
 } from './host/opencode-client.js';
@@ -175,8 +176,9 @@ export function startDaemonBackground(cliOptions = {}) {
   const childPid = child.pid;
   fs.writeFileSync(PID_FILE, String(childPid), 'utf8');
 
-  // 脱钩父进程
+  // 脱钩父进程并关闭父进程的 logFd
   child.unref();
+  try { fs.closeSync(logFd); } catch {}
 
   console.log(`✅ [memhub daemon] 成功在后台启动！`);
   console.log(`   - 进程 PID: ${childPid}`);
@@ -440,6 +442,19 @@ export function runDaemonForeground(cliOptions = {}) {
           if (!forkId) throw new Error('fork 未返回有效会话 id');
           console.log(`   🍴 已 fork 抽取副本: ${forkId} (目录: ${fork.directory || session.directory})`);
 
+          // 1.1 快照 fork 副本的既有消息 ID（真机 F16：副本继承源会话历史，含 idle+succeeded）。
+          //     之后只认新增消息，避免把继承的历史 idle 误当本次抽取完成 → 秒短路丢数据。
+          //     snapshotForkBaseline 内部「最小沉淀 6s + 消息集稳定」双保险（真机 F16-b/F18）。
+          //     快照失败必须中止本次抽取（不能降级为「无基线」——那会重新落入继承 idle 误判），
+          //     交上层置 FAILED 可重试。
+          let baselineIds;
+          try {
+            baselineIds = await snapshotForkBaseline(baseUrl, forkId, { timeoutMs: 8000 });
+          } catch (be) {
+            throw new Error(`fork 基线快照失败（为避免误判完成，中止本次抽取）: ${be.message}`);
+          }
+          console.log(`   📌 fork 基线快照: ${baselineIds.size} 条历史消息已隔离`);
+
           // 2. 向 fork 副本注入沉淀指令（结果归属原会话）
           const res = await dispatchExtractionPrompt(baseUrl, {
             sessionId: forkId,
@@ -458,6 +473,7 @@ export function runDaemonForeground(cliOptions = {}) {
           const waited = await waitForSessionIdle(baseUrl, forkId, {
             pollIntervalMs: 3000,
             maxWaitMs: 300000,
+            baselineIds,
             onWait: (st, ms) => {
               if (ms > 0 && ms % 30000 < 3000) {
                 console.log(`      ...仍处理中 (状态: ${st}, 已等待 ${Math.round(ms / 1000)}s)`);
@@ -466,16 +482,28 @@ export function runDaemonForeground(cliOptions = {}) {
           });
           if (waited.completed) {
             console.log(`   ✅ fork 副本复盘完成 (耗时 ${Math.round(waited.waitedMs / 1000)}s)，宿主 LLM 已调用 memhub_save`);
+          } else if (waited.status === 'failed') {
+            // 宿主任务已结束但失败/中断（idle 消息 outcome=failed/interrupted）：不得当成功，置 FAILED 可重试
+            console.warn(`   ⚠️ fork 副本复盘失败收尾 (outcome: ${waited.outcome})，本次不计入已抽取`);
           } else {
-            console.warn(`   ⚠️ fork 副本等待超时 (最终状态: ${waited.finalStatus})`);
+            // 超时未完成：置 FAILED（可重试），绝不当成功，杜绝静默腰斩与假状态
+            console.warn(`   ⚠️ fork 副本等待超时 (最终状态: ${waited.finalStatus})，本次不计入已抽取`);
           }
 
-          // 更新 tracking 状态为 EXTRACTED
-          db.prepare(`
-            UPDATE session_tracking 
-            SET status = 'EXTRACTED', updated_at = ? 
-            WHERE session_id = ?
-          `).run(Date.now(), session.id);
+          // 仅「抽取成功」才置 EXTRACTED；失败/超时一律 FAILED，保证可重试
+          if (waited.completed) {
+            db.prepare(`
+              UPDATE session_tracking 
+              SET status = 'EXTRACTED', updated_at = ? 
+              WHERE session_id = ?
+            `).run(Date.now(), session.id);
+          } else {
+            db.prepare(`
+              UPDATE session_tracking 
+              SET status = 'FAILED', updated_at = ? 
+              WHERE session_id = ?
+            `).run(Date.now(), session.id);
+          }
         } catch (e) {
           console.error(`   ❌ 驱动抽取失败: ${e.message}`);
           db.prepare(`

@@ -35,40 +35,229 @@ function basicAuthHeader() {
   return 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
 }
 
+/* ============================================================================
+ * 【版本探测与双版本适配层 (V1 / V2 Detection & Adapter)】
+ *
+ * 背景：OpenCode 2 把「服务端 API 契约」列为官方刻意破坏性变更之一：
+ *   - 所有端点统一加 `/api` 前缀且语义变化；
+ *   - 响应改为 `{ data, cursor }` 信封（不再裸数组）；
+ *   - 会话对象 directory -> location.directory，timeUpdated -> time.{created,updated}；
+ *   - 消息由「一条 message 带 parts」改为「判别联合 typed message」，
+ *     assistant 回复改为 { type:'assistant', content:[{type:'text'|'reasoning'|'tool'}] }；
+ *   - prompt_async 合并为 prompt，body 由 { parts:[{type:'text',text}] } 改为扁平的 { text }；
+ *   - 批量 /session/status 取消，改为 /api/session/active（仅返回 running 集合）。
+ *
+ * 设计：探测结果按 baseUrl 缓存，一次探测终身复用（server 换版本概率极低）。
+ *       上层 daemon.js / dream/pipeline.js 的调用签名保持不变，差异全部收敛在本文件。
+ *
+ * 判定顺序采用「端点探测」——最贴近运行时真实行为，不依赖版本号字符串格式：
+ *   1. GET /api/info 通 -> v2（先探 v2，避免 v1 未来新增 /api/info 造成误判的成本更高；
+ *      实际上 v1 无该端点，v2 亦无 /global/health，两者互斥，判定唯一）
+ *   2. GET /global/health 通 -> v1
+ * ========================================================================== */
+
+export const OPENCODE_API_VERSION = { V1: 1, V2: 2 };
+
+/** baseUrl -> 版本号 的探测缓存（进程内 Map，避免每次调用多打一次探测） */
+const versionCache = new Map();
+
+/**
+ * 探测单个 baseUrl 的 OpenCode API 版本（端点探测，带缓存）。
+ * @param {string} baseUrl
+ * @param {number} timeoutMs
+ * @returns {Promise<1|2|null>} 1=V1, 2=V2, null=不可达/非 OpenCode server
+ */
+export async function detectApiVersion(baseUrl, timeoutMs = 3000) {
+  if (!baseUrl) return null;
+  const key = String(baseUrl).replace(/\/$/, '');
+  if (versionCache.has(key)) return versionCache.get(key);
+
+  const auth = basicAuthHeader();
+  // 探测策略（安全加固 · 避免向无关本地服务首发凭据）：
+  //   1) 先【裸探】：200(JSON) 命中；**401 也是强特征**——OpenCode 鉴权失败会返回
+  //      `WWW-Authenticate: Basic`（真机 F2 确证），此时才视为"疑似 OpenCode"；
+  //   2) 仅在裸探确认疑似 OpenCode（200 或 401）后，才【带凭据】重探拿真实 payload。
+  // 这样凭据只发给已确认/疑似 OpenCode 的端点，不会先发给 netstat 枚举出的任意端口。
+  const probe = async (path) => {
+    const doFetch = async (headers) => {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), timeoutMs);
+        const res = await fetch(`${key}${path}`, { headers, signal: ctrl.signal });
+        clearTimeout(t);
+        return res;
+      } catch {
+        return null;
+      }
+    };
+
+    // 1) 裸探
+    const naked = await doFetch({});
+    if (naked && naked.status === HTTP_OK) {
+      const raw = await naked.text();
+      let parsed = null;
+      try { parsed = JSON.parse(raw); } catch { /* 非 JSON -> 非 API server（排除 SPA HTML 兜底，见 F1） */ }
+      if (parsed && typeof parsed === 'object') return parsed;
+      return null;
+    }
+    const looksLikeOpenCode = naked && (naked.status === HTTP_OK || naked.status === HTTP_UNAUTHORIZED);
+    if (!looksLikeOpenCode || !auth) return null;
+
+    // 2) 确认疑似 OpenCode 后，才带凭据重探
+    const withAuth = await doFetch({ Authorization: auth });
+    if (withAuth && withAuth.status === HTTP_OK) {
+      const raw = await withAuth.text();
+      let parsed = null;
+      try { parsed = JSON.parse(raw); } catch { /* 非 JSON */ }
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+    return null;
+  };
+
+  // 先探 v2（/api/info 返回 ServerInfo），再探 v1（/global/health 返回 healthy/version）
+  const info = await probe('/api/info');
+  if (info && (info.version !== undefined || info.pid !== undefined || info.urls !== undefined)) {
+    versionCache.set(key, OPENCODE_API_VERSION.V2);
+    return OPENCODE_API_VERSION.V2;
+  }
+  const health = await probe('/global/health');
+  if (health && (health.healthy !== undefined || health.version !== undefined)) {
+    versionCache.set(key, OPENCODE_API_VERSION.V1);
+    return OPENCODE_API_VERSION.V1;
+  }
+  return null;
+}
+
+/** 清空版本探测缓存（测试或 server 重启换版本时显式调用） */
+export function clearApiVersionCache(baseUrl) {
+  if (baseUrl) versionCache.delete(String(baseUrl).replace(/\/$/, ''));
+  else versionCache.clear();
+}
+
+/** 解析 baseUrl 当前版本，探测失败时按 v1 兜底（保持既有行为）。 */
+async function resolveVersion(baseUrl, timeoutMs = 3000) {
+  const v = await detectApiVersion(baseUrl, timeoutMs);
+  return v || OPENCODE_API_VERSION.V1;
+}
+
+/* ---------------------- V1 / V2 端点路径映射 ---------------------- */
+
+function endpoints(version, sessionId) {
+  const sid = sessionId ? encodeURIComponent(sessionId) : '';
+  if (version === OPENCODE_API_VERSION.V2) {
+    return {
+      listSessions: '/api/session',
+      session: `/api/session/${sid}`,
+      messages: `/api/session/${sid}/message`,
+      fork: `/api/session/${sid}/fork`,
+      prompt: `/api/session/${sid}/prompt`,
+      active: '/api/session/active'
+    };
+  }
+  return {
+    listSessions: '/session',
+    session: `/session/${sid}`,
+    messages: `/session/${sid}/message`,
+    fork: `/session/${sid}/fork`,
+    prompt: `/session/${sid}/prompt_async`,
+    active: '/session/status'
+  };
+}
+
+/** 统一解包响应信封：v2 返回 { data, cursor }，v1 返回裸值/数组 */
+function unwrap(payload) {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'data' in payload) {
+    return payload.data;
+  }
+  return payload;
+}
+
+/** 提取响应信封的 cursor（v1 裸数组无 cursor，返回 null）。 */
+function unwrapCursor(payload) {
+  if (payload && typeof payload === 'object' && !Array.isArray(payload) && payload.cursor) {
+    return payload.cursor;
+  }
+  return null;
+}
+
+/* ---------------------- V2 消息分页常量 ---------------------- */
+// 真机（F13）确证：`order` 与 `cursor` 不可组合（服务端 400 InvalidCursorError），
+// 因此翻页必须「只带 cursor」，且翻页全程顺序恒为 desc（新→旧）。
+// 真机（F17）确证：服务端 `limit` 上限为 **200**，>200 直接 400 InvalidRequestError。
+// 故保守取 100（远离上限，兼容未来上限下调的版本）。
+const MESSAGE_PAGE_LIMIT = 100;   // 单页拉取条数（保守值，避开真机 200 上限）
+const MESSAGE_MAX_PAGES = 100;    // 页数硬上限，防 cursor 不推进导致死循环
+const MESSAGE_MAX_ITEMS = 10000;  // 条数硬上限，防超大会话拖垮内存
+const SESSION_PAGE_LIMIT = 100;   // 会话列表单页条数
+const SESSION_MAX_PAGES = 20;     // 会话列表页数硬上限
+
+/** 兼容解析会话更新时间戳（v2: time.updated / v1: time.updated 或驼峰） */
+export function getSessionUpdatedTime(s) {
+  if (!s) return 0;
+  return Number(s.time?.updated ?? s.timeUpdated ?? s.time?.created ?? s.timeCreated ?? 0);
+}
+
+/** 兼容解析会话目录（v2: location.directory / v1: directory 或 path） */
+export function getSessionDirectory(s) {
+  if (!s) return '';
+  return s.location?.directory || s.directory || s.path || '';
+}
+
+/** 归一化会话对象，屏蔽 v1/v2 字段差异，向上层提供稳定形状。 */
+function normalizeSession(s) {
+  if (!s || typeof s !== 'object') return s;
+  return {
+    ...s,
+    directory: getSessionDirectory(s),
+    timeUpdated: getSessionUpdatedTime(s),
+    timeCreated: Number(s.time?.created ?? s.timeCreated ?? 0)
+  };
+}
+
+/**
+ * 归一化单条会话消息为 { role, text }：
+ *   v1: entry.info.role + entry.parts[].{type:'text',text}
+ *   v2: entry 为判别联合，entry.type ∈ {user, assistant, system, synthetic, ...}，
+ *       user/system/synthetic 直接带 text；
+ *       assistant 的文本在 entry.content[] 中按 type 过滤 text/reasoning。
+ */
+function normalizeMessage(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+
+  // ---- v2 形状 ----
+  const t = entry.type;
+  if (t === 'assistant') {
+    const content = Array.isArray(entry.content) ? entry.content : [];
+    const texts = content
+      .filter(c => (c?.type === 'text' || c?.type === 'reasoning') && typeof c?.text === 'string')
+      .map(c => c.text);
+    if (texts.length) return { role: 'assistant', text: texts.join('\n') };
+    return null;
+  }
+  if (typeof t === 'string' && ['user', 'system', 'synthetic'].includes(t)) {
+    return typeof entry.text === 'string' && entry.text
+      ? { role: t === 'user' ? 'user' : 'system', text: entry.text }
+      : null;
+  }
+
+  // ---- v1 形状 ----
+  const role = entry?.info?.role || 'unknown';
+  const parts = Array.isArray(entry?.parts) ? entry.parts : [];
+  const texts = parts.filter(p => p?.type === 'text' && typeof p?.text === 'string').map(p => p.text);
+  if (texts.length) return { role, text: texts.join('\n') };
+  return null;
+}
+
 /**
  * 尝试探测某个 baseUrl 是否为可用的 opencode API server。
- * 兼容鉴权与无鉴权两种模式：无密码时直接探；有密码时先带 Authorization 探。
+ * 兼容 V1（/global/health）与 V2（/api/info）两代端点；命中即返回版本号。
  * 返回 null 表示不可达/不是 opencode server。
  */
 async function probeOpenCodeServer(baseUrl, timeoutMs = 3000) {
-  const auth = basicAuthHeader();
-  const headers = {};
-  if (auth) headers.Authorization = auth;
-
-  for (const withAuth of [true, false]) {
-    const h = withAuth && auth ? { ...headers } : {};
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), timeoutMs);
-      const res = await fetch(`${baseUrl}/global/health`, { headers: h, signal: ctrl.signal });
-      clearTimeout(t);
-      if (res.status === HTTP_OK) {
-        const raw = await res.text();
-        // 严格校验：opencode health 端点应返回 JSON 且含 healthy/version 字段，
-        // 排除 SPA 前端资源对 /global/health 的 HTML 兜底误判。
-        let parsed = null;
-        try { parsed = JSON.parse(raw); } catch { /* 非 JSON 则非 opencode API server */ }
-        if (parsed && (parsed.healthy !== undefined || parsed.version !== undefined)) {
-          return { baseUrl, healthy: true, body: raw };
-        }
-        continue; // 200 但非 opencode health JSON -> 继续下一策略
-      }
-      if (res.status === HTTP_UNAUTHORIZED && !withAuth) continue;
-    } catch {
-      // 不可达，继续下一轮
-    }
-  }
-  return null;
+  const base = String(baseUrl).replace(/\/$/, '');
+  const version = await detectApiVersion(base, timeoutMs);
+  if (!version) return null;
+  return { baseUrl: base, healthy: true, version };
 }
 
 function isWindows() {
@@ -196,51 +385,113 @@ export async function discoverOpenCodeServer(opts = {}) {
 }
 
 /**
+ * 拉取会话的全部原始消息条目（不做归一化），供上层按需解析。
+ *
+ * 【版本分流——真机 F13 确证的硬契约】
+ *   - V1：`/session/:id/message` 返回**裸数组**，无分页概念（无 cursor 字段）。
+ *         一次性读取，不传 limit/order（V1 是否理解这些 query 参数未验证，传了反而有风险）。
+ *   - V2：`/api/session/:id/message` 返回 `{ data, cursor }` 信封，**默认仅 50 条且默认 desc**；
+ *         必须显式翻页才能拿全。可用 `cursor.next` 循环翻页（`cursor.previous` 反向）。
+ *
+ * 【关键约束：order 与 cursor 互斥】
+ *   真机（F13）实测 `?order=asc&cursor=xxx` → 400 `InvalidCursorError`。
+ *   故 V2 翻页**只能只带 cursor、绝不同时带 order**，且翻页全程顺序为 **desc（新→旧）**。
+ *   需要「最新一条」的调用方应取返回数组的首元素（desc 语义），而非末元素。
+ *
+ * @returns {Promise<Array<Object>>} 原始消息条目数组（V2 为 desc 顺序，即首元素最新）
+ */
+async function readAllMessages(baseUrl, sessionId, opts = {}) {
+  const version = await resolveVersion(baseUrl);
+  const ep = endpoints(version, sessionId);
+  const auth = basicAuthHeader();
+  const headers = {};
+  if (auth) headers.Authorization = auth;
+  const timeoutMs = opts.timeoutMs || 8000;
+
+  // ---- V1：裸数组，一次性读取（保持既有行为） ----
+  if (version !== OPENCODE_API_VERSION.V2) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${baseUrl}${ep.messages}`, { headers, signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) throw new Error(`读取会话消息失败 HTTP ${res.status}`);
+      const payload = unwrap(await res.json());
+      return Array.isArray(payload) ? payload : [];
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  // ---- V2：cursor 驱动的翻页（只带 cursor，不带 order） ----
+  const all = [];
+  let cursor = null;
+  let pages = 0;
+  // 真机 F17：limit 超服务端上限会 400。此处**循环降级**直至下限（1）：
+  // 单次降级不足以覆盖「服务端上限很低」的版本，必须能一路降到 1 才可靠。
+  let pageLimit = opts.pageLimit || MESSAGE_PAGE_LIMIT;
+  const minLimit = opts.minPageLimit || 1;
+  do {
+    const qs = new URLSearchParams();
+    qs.set('limit', String(pageLimit));
+    if (cursor) qs.set('cursor', cursor);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    let res, json;
+    try {
+      res = await fetch(`${baseUrl}${ep.messages}?${qs.toString()}`, { headers, signal: ctrl.signal });
+      clearTimeout(t);
+      // 400（如 limit 超上限 InvalidRequestError）→ 继续降半重试（同一 cursor 页）
+      if (res.status === 400 && pageLimit > minLimit) {
+        pageLimit = Math.max(minLimit, Math.floor(pageLimit / 2));
+        continue;
+      }
+      if (!res.ok) throw new Error(`读取会话消息失败 HTTP ${res.status}`);
+      json = await res.json();
+    } finally {
+      clearTimeout(t);
+    }
+    const page = unwrap(json);
+    if (Array.isArray(page)) all.push(...page);
+    pages++;
+    const next = unwrapCursor(json)?.next || null;
+    // 防死循环：cursor 不推进 或 达页数/条数上限即止
+    if (!next || next === cursor) break;
+    if (pages >= (opts.maxPages || MESSAGE_MAX_PAGES)) break;
+    if (all.length >= (opts.maxItems || MESSAGE_MAX_ITEMS)) break;
+    cursor = next;
+  } while (true);
+  return all;
+}
+
+/**
  * 读取指定会话的文本消息列表（用于宿主 LLM 或后台分析）。
  * @param {string} baseUrl
  * @param {string} sessionId
  * @returns {Promise<Array<{role:string,text:string}>>}
  */
 export async function readSessionMessages(baseUrl, sessionId, timeoutMs = 8000) {
-  const auth = basicAuthHeader();
-  const headers = {};
-  if (auth) headers.Authorization = auth;
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${baseUrl}/session/${encodeURIComponent(sessionId)}/message`, {
-      headers, signal: ctrl.signal
-    });
-    clearTimeout(t);
-    if (!res.ok) throw new Error(`读取会话消息失败 HTTP ${res.status}`);
-    const arr = await res.json();
-    const msgs = [];
-    for (const entry of Array.isArray(arr) ? arr : []) {
-      const role = entry?.info?.role || 'unknown';
-      const parts = Array.isArray(entry?.parts) ? entry.parts : [];
-      const texts = parts.filter(p => p?.type === 'text' && typeof p?.text === 'string').map(p => p.text);
-      if (texts.length) msgs.push({ role, text: texts.join('\n') });
-    }
-    return msgs;
-  } finally {
-    clearTimeout(t);
+  const entries = await readAllMessages(baseUrl, sessionId, { timeoutMs });
+  const msgs = [];
+  for (const entry of entries) {
+    const m = normalizeMessage(entry);
+    if (m) msgs.push(m);
   }
+  return msgs;
 }
 
-/**
- * 安全解析会话更新时间戳（兼容 OpenCode 原生 time.updated 与驼峰 timeUpdated）
- */
-export function getSessionUpdatedTime(s) {
-  if (!s) return 0;
-  return Number(s.time?.updated ?? s.timeUpdated ?? s.time?.created ?? s.timeCreated ?? 0);
-}
+/* 已知子代理（subagent）角色黑名单：仅拦截这些，未知 agent 默认放行，
+   避免白名单式（非 build 即拦截）误杀 plan 等新主模式。来源：opencode 内置子代理。 */
+const SUBAGENT_AGENTS = new Set(['review', 'explore', 'general', 'image-reader', 'subagent']);
 
 /**
  * 统一 Subagent 判定门禁：识别并排除所有子任务与委派智能体
- * 判定依据：
+ * 判定依据（按可靠性降序）：
  * 1. 结构标记：parentID / parent_id 存在即代表子会话；
- * 2. 角色特征：agent 属于 review / explore / general / image-reader 等辅助子代理；
- * 3. 标题特征：包含 subagent、sub-agent 或 @review 等标记。
+ * 2. **权威标记：session.fork.sessionID 存在即代表 fork 抽取副本**（真机 F14 确证
+ *    `GET /api/session` 列表元素携带 fork 字段；比标题正则权威）；
+ * 3. 角色特征：agent 命中已知子代理黑名单；
+ * 4. 标题特征：包含 subagent、sub-agent 或 @review 等标记，或以 "(fork #N)" 结尾。
  */
 export function isSubagentSession(session) {
   if (!session || typeof session !== 'object') return false;
@@ -250,13 +501,18 @@ export function isSubagentSession(session) {
     return true;
   }
 
-  // 2. 专用子智能体角色检查 (排除非主任务 agent)
-  const agent = String(session.agent || '').toLowerCase().trim();
-  if (agent && agent !== 'build' && agent !== 'main' && agent !== 'default') {
+  // 2. 权威 fork 标记（HTTP 路径有；DB 路径无此字段，仍靠下方标题兜底）
+  if (session.fork && session.fork.sessionID) {
     return true;
   }
 
-  // 3. 标题特征模式检查
+  // 3. 已知子智能体角色黑名单（未知 agent 默认放行，避免误杀新主模式）
+  const agent = String(session.agent || '').toLowerCase().trim();
+  if (agent && SUBAGENT_AGENTS.has(agent)) {
+    return true;
+  }
+
+  // 4. 标题特征模式检查
   const title = String(session.title || '').toLowerCase();
   if (
     title.includes('subagent') ||
@@ -268,13 +524,68 @@ export function isSubagentSession(session) {
     return true;
   }
 
-  // 4. 记忆抽取 fork 会话拦截：daemon 派发的 fork 会继承原目录且无 parentID，
+  // 5. 记忆抽取 fork 会话拦截：daemon 派发的 fork 会继承原目录且无 parentID，
   //    仅靠 parentID 无法识别，必须用标题后缀 "(fork #N)" 特征拦截，杜绝套娃循环抽取。
   if (/\(fork #\d+\)$/i.test(title)) {
     return true;
   }
 
   return false;
+}
+
+/**
+ * 拉取会话列表（V1 裸数组一次性读取；V2 cursor 翻页拿全）。
+ * @returns {Promise<Array<Object>>} 原始会话条目数组
+ */
+async function listAllSessions(baseUrl, ep, headers, version, timeoutMs = 8000) {
+  // V1：裸数组，一次性读取
+  if (version !== OPENCODE_API_VERSION.V2) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${baseUrl}${ep.listSessions}`, { headers, signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) throw new Error(`列出会话失败 HTTP ${res.status}`);
+      const payload = unwrap(await res.json());
+      return Array.isArray(payload) ? payload : [];
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  // V2：cursor 翻页（只带 cursor，不带 order）；limit 超上限时循环降级（同消息接口）
+  const all = [];
+  let cursor = null;
+  let pages = 0;
+  let pageLimit = SESSION_PAGE_LIMIT;
+  do {
+    const qs = new URLSearchParams();
+    qs.set('limit', String(pageLimit));
+    if (cursor) qs.set('cursor', cursor);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    let json;
+    try {
+      const res = await fetch(`${baseUrl}${ep.listSessions}?${qs.toString()}`, { headers, signal: ctrl.signal });
+      clearTimeout(t);
+      if (res.status === 400 && pageLimit > 1) {
+        pageLimit = Math.max(1, Math.floor(pageLimit / 2));
+        continue;
+      }
+      if (!res.ok) throw new Error(`列出会话失败 HTTP ${res.status}`);
+      json = await res.json();
+    } finally {
+      clearTimeout(t);
+    }
+    const page = unwrap(json);
+    if (Array.isArray(page)) all.push(...page);
+    pages++;
+    const next = unwrapCursor(json)?.next || null;
+    if (!next || next === cursor) break;
+    if (pages >= SESSION_MAX_PAGES) break;
+    cursor = next;
+  } while (true);
+  return all;
 }
 
 /**
@@ -301,19 +612,14 @@ export async function listCandidateSessions(baseUrl, opts = {}) {
   const headers = {};
   if (auth) headers.Authorization = auth;
 
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 8000);
-  let sessions;
-  try {
-    const res = await fetch(`${baseUrl}/session`, { headers, signal: ctrl.signal });
-    clearTimeout(t);
-    if (!res.ok) throw new Error(`列出会话失败 HTTP ${res.status}`);
-    sessions = await res.json();
-  } finally {
-    clearTimeout(t);
-  }
+  const version = await resolveVersion(baseUrl);
+  const ep = endpoints(version);
 
-  const list = Array.isArray(sessions) ? sessions : [];
+  // 拉取会话列表。V2 为 { data, cursor } 信封且默认仅返回较新的 50 条，需翻页拿全；
+  // V1 为裸数组，一次性读取。翻页仅带 cursor（不带 order，真机 F13 证二者互斥）。
+  const sessions = await listAllSessions(baseUrl, ep, headers, version);
+
+  const list = (Array.isArray(sessions) ? sessions : []).map(normalizeSession);
   const now = Date.now();
   const maxAgeMs = windowDays * 24 * 3600 * 1000;
   const minIdleMs = idleMinutes * 60 * 1000;
@@ -329,7 +635,7 @@ export async function listCandidateSessions(baseUrl, opts = {}) {
     if (isSubagentSession(s)) continue;
 
     // 路径 include / exclude 规则过滤
-    const targetDir = s.directory || s.path || '';
+    const targetDir = getSessionDirectory(s);
     if (filter && targetDir && !filter.isAllowed(targetDir)) continue;
 
     const updated = getSessionUpdatedTime(s);
@@ -344,7 +650,7 @@ export async function listCandidateSessions(baseUrl, opts = {}) {
     candidates.push({
       id: s.id,
       title: s.title || '',
-      directory: s.directory || s.path || '',
+      directory: getSessionDirectory(s),
       timeUpdated: updated,
       timeCreated: Number(s.time?.created ?? s.timeCreated ?? 0)
     });
@@ -383,17 +689,23 @@ export { buildExtractionPrompt };
  */
 export async function forkSession(baseUrl, sessionId, opts = {}) {
   if (!sessionId) throw new Error('forkSession: 缺少必须的 sessionId');
+  const version = await resolveVersion(baseUrl);
+  const ep = endpoints(version, sessionId);
   const auth = basicAuthHeader();
   const headers = { 'content-type': 'application/json' };
   if (auth) headers.Authorization = auth;
 
+  // v2 用 before（msg_ 前缀）指定 fork 边界；v1 用 messageID。语义等价映射。
   const body = {};
-  if (opts.messageID) body.messageID = opts.messageID;
+  if (opts.messageID) {
+    if (version === OPENCODE_API_VERSION.V2) body.before = opts.messageID;
+    else body.messageID = opts.messageID;
+  }
 
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), opts.timeoutMs || 20000);
   try {
-    const res = await fetch(`${baseUrl}/session/${encodeURIComponent(sessionId)}/fork`, {
+    const res = await fetch(`${baseUrl}${ep.fork}`, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -401,17 +713,87 @@ export async function forkSession(baseUrl, sessionId, opts = {}) {
     });
     clearTimeout(t);
     if (!res.ok) throw new Error(`fork 会话失败 HTTP ${res.status}`);
-    return await res.json();
+    return normalizeSession(unwrap(await res.json()));
   } finally {
     clearTimeout(t);
   }
 }
 
 /**
+ * 对 fork 副本的当前消息 ID 做快照，作为「本次抽取新增消息」的基线。
+ *
+ * 【为什么需要（真机 F16 二次修正）】
+ *   fork 副本会继承源会话历史（含 idle），且其消息 ID 被重写、boundary 不在副本中。
+ *   故 fork 后先快照现有消息 ID，之后 `getLastAssistantProgress` / `waitForSessionIdle`
+ *   只认可**不在快照中**的新增消息，即可隔离继承的历史 idle。
+ *
+ * 【关键：必须「等消息集稳定」而非固定等待（真机 F16-b/F18）】
+ *   真机实测：副本历史复制**非同步完成**（约 6s 才稳定，且存在 20s 内 0 条的极端案例）。
+ *   若用固定短等待（如 1.5s）快照，则复制在窗口之后插入的**继承消息**会被误当「新增」，
+ * 【关键：必须「最小沉淀时长 + 消息集稳定」双保险（真机 F16-b/F18 + 复审实测）】
+ *   真机实测：副本历史复制**非同步完成**（约 6s 才稳定，存在 20s 内 0 条的极端案例）。
+ *   复审实测进一步证明：**单纯「连续两次一致」在复制长停顿时会误判稳定**
+ *   （停顿 1800/3000/5000ms 均会漏掉随后插入的历史 idle，且**停顿越长越必然误判**）。
+ *   故必须叠加**最小沉淀时长 `minSettleMs`（默认 6000ms，源自真机 6s 观察）**，
+ *   在沉淀期结束前**绝不返回快照**，沉淀期后再要求消息集稳定。
+ *
+ * @param {string} baseUrl
+ * @param {string} sessionId fork 副本 id
+ * @param {Object} opts { timeoutMs?, maxWaitMs?, pollIntervalMs?, minSettleMs? }
+ * @returns {Promise<Set<string>>} 消息 ID 快照集合
+ */
+export async function snapshotForkBaseline(baseUrl, sessionId, opts = {}) {
+  const timeoutMs = opts.timeoutMs || 8000;
+  const maxWaitMs = opts.maxWaitMs || 20000;      // 稳定等待上限
+  const pollIntervalMs = opts.pollIntervalMs || 1500;
+  // 最小沉淀时长：源自真机「复制约 6s 稳定」观察 + 复审实测「长停顿会误判稳定」。
+  // 沉淀期内无论消息集是否"看起来稳定"，都不得返回快照。
+  const minSettleMs = opts.minSettleMs ?? 6000;
+  const start = Date.now();
+
+  const snapshot = async () => {
+    const entries = await readAllMessages(baseUrl, sessionId, { timeoutMs });
+    const ids = new Set();
+    for (const e of entries) {
+      if (e && e.id) ids.add(e.id);
+    }
+    return ids;
+  };
+  const sameSet = (a, b) => {
+    if (a.size !== b.size) return false;
+    for (const x of a) if (!b.has(x)) return false;
+    return true;
+  };
+
+  let prev = await snapshot();
+  while (Date.now() - start < maxWaitMs) {
+    await new Promise(r => setTimeout(r, pollIntervalMs));
+    const cur = await snapshot();
+    const settled = Date.now() - start >= minSettleMs;
+    // 双保险：① 已过最小沉淀期；② 消息集连续两次一致。二者同时满足才返回。
+    if (settled && sameSet(prev, cur)) return cur;
+    prev = cur;
+  }
+  // 超时仍未观测到稳定：**抛错**而非返回残缺快照——残缺快照会把继承消息误当「新增」，
+  // 正是 F16 要防的误判。抛错由 daemon 捕获后按「无基线」处理（保守：宁可超时也不误判完成）。
+  throw new Error(`snapshotForkBaseline 超时未能确认副本消息稳定（sessionId=${sessionId}）`);
+}
+
+/**
  * 读取单个会话的运行态（idle / busy / retry）。
- * @returns {Promise<string>} 'idle' | 'busy' | 'retry' | 'unknown'
+ *
+ * 【关键语义修正——真机 F10/F11 确证】
+ *   V2 的 `/api/session/active` **只返回 running 会话集合**，其语义是「当前是否有活跃任务」，
+ *   **不代表会话是否存在或已完成**。真机实测：刚 fork 出的空副本**不在** active 集合中，
+ *   若据此判定为 'idle'，会导致 `waitForSessionIdle` 秒短路（1015ms 就判完成）→ fork 被删
+ *   → 抽取 100% 丢失。故 V2 下「不在 active 集合」必须返回 **'unknown'**（与 V1 语义对齐），
+ *   完成判定改由 `type:'idle'` 消息承担（见 getLastAssistantProgress / waitForSessionIdle）。
+ *
+ * @returns {Promise<string>} 'idle' | 'busy' | 'retry' | 'running' | 'unknown'
  */
 export async function getSessionStatus(baseUrl, sessionId, timeoutMs = 8000) {
+  const version = await resolveVersion(baseUrl);
+  const ep = endpoints(version);
   const auth = basicAuthHeader();
   const headers = {};
   if (auth) headers.Authorization = auth;
@@ -419,11 +801,22 @@ export async function getSessionStatus(baseUrl, sessionId, timeoutMs = 8000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${baseUrl}/session/status`, { headers, signal: ctrl.signal });
+    const res = await fetch(`${baseUrl}${ep.active}`, { headers, signal: ctrl.signal });
     clearTimeout(t);
     if (!res.ok) throw new Error(`读取会话状态失败 HTTP ${res.status}`);
-    const map = await res.json();
-    const st = map?.[sessionId];
+    const payload = unwrap(await res.json());
+
+    if (version === OPENCODE_API_VERSION.V2) {
+      // v2 /api/session/active 只返回 running 会话集合。
+      // 在集合中 -> running（有活跃任务）；不在集合中 -> unknown（**不可判 idle**，见上文说明）。
+      if (payload && typeof payload === 'object' && payload[sessionId]) {
+        const t = payload[sessionId]?.type;
+        return typeof t === 'string' ? t : 'running';
+      }
+      return 'unknown';
+    }
+    // v1 /session/status 返回 { [sessionId]: { type } }
+    const st = payload?.[sessionId];
     if (!st) return 'unknown';
     return st.type || 'unknown';
   } finally {
@@ -432,65 +825,149 @@ export async function getSessionStatus(baseUrl, sessionId, timeoutMs = 8000) {
 }
 
 /**
- * 读取会话最后一次 assistant 回复的完成度。
+ * 读取会话的完成状况。返回结构化三态，供上层区分「成功 / 失败 / 未完成」。
  *
- * 背景：/session/status 并不总是包含 fork 副本（部分宿主实现只跟踪 TUI 侧会话），
- * 因此不能仅靠 status 判定抽取是否结束。更可靠的信号是最后一条 assistant 消息：
- *   - 仍在推理：parts 为空 / 无 time.completed
- *   - 已完成：存在 time.completed，或 parts 非空且不再增长
+ * 【完成判定设计——真机 F4/F12 确证】
+ *   V2 宿主在任务结束后会写入一条 `type:'idle'` 消息，携带 `outcome`
+ *   （OpenAPI: enum = succeeded | failed | interrupted）。这是**权威完成信号**，
+ *   比 `/api/session/active`（只表示"有无活跃任务"，真机 F10/F11 已证其不可用于完成判定）
+ *   和 `time.streamed`（语义可疑，已移除 OR 判定）都可靠。
  *
- * @returns {Promise<{hasReply:boolean, completed:boolean, partsCount:number}>}
+ * 【关键：fork 副本继承历史 idle（真机 F16）】
+ *   真机实测：fork 出的副本**继承源会话全部历史消息**（含多条 `idle`+`succeeded`）。
+ *   若直接取「末条 idle」，会把**继承来的历史 idle** 误当本次抽取的完成信号 →
+ *   刚 fork 就秒判完成 → 仍然丢数据。
+ *
+ * 【锚点选择：为什么用「ID 快照集合」而非 boundary messageID（真机 F16 二次修正）】
+ *   真机实测：fork 副本的消息 **ID 被整体重写**（如 `..._1416` 后缀），且**只保留最近 100 条**，
+ *   而 `fork.boundary.messageID`（fork 点）**不在副本中**（超出保留范围）。
+ *   故「按 boundary messageID 定位」在真机不可行。
+ *   改用 **「fork 后对副本消息 ID 快照，只认不在快照中的消息」**——真机已验证：
+ *   副本复制约 6s 后稳定，快照后新增的 idle 正是本次抽取完成信号。
+ *
+ * 【判定优先级】
+ *   1. baseline 之外（即本次新增）存在 `type:'idle'` 消息：succeeded -> completed=true；
+ *      failed/interrupted -> completed=false（status='failed'，上层置 FAILED）；
+ *   2. 无 idle 时，回退看 baseline 之外末条 assistant 是否 `time.completed` 且 content 非空；
+ *   3. 均无 -> 未完成。
+ *
+ * @param {Object} [opts] { baselineIds?: Set<string>|string[] } fork 后快照的消息 ID 集合
+ *                       （只认可不在该集合中的新增消息）
+ * @returns {Promise<{hasReply:boolean, completed:boolean, partsCount:number,
+ *                    outcome:string|null, status:'success'|'failed'|'incomplete'}>}
  */
-export async function getLastAssistantProgress(baseUrl, sessionId, timeoutMs = 8000) {
-  const auth = basicAuthHeader();
-  const headers = {};
-  if (auth) headers.Authorization = auth;
+export async function getLastAssistantProgress(baseUrl, sessionId, timeoutMs = 8000, opts = {}) {
+  const version = await resolveVersion(baseUrl);
+  const arr = await readAllMessages(baseUrl, sessionId, { timeoutMs });
+  const isV2 = version === OPENCODE_API_VERSION.V2;
 
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${baseUrl}/session/${encodeURIComponent(sessionId)}/message`, {
-      headers, signal: ctrl.signal
-    });
-    clearTimeout(t);
-    if (!res.ok) throw new Error(`读取会话消息失败 HTTP ${res.status}`);
-    const arr = await res.json();
-    const list = Array.isArray(arr) ? arr : [];
-    for (let i = list.length - 1; i >= 0; i--) {
-      const info = list[i]?.info;
-      if (info?.role === 'assistant') {
-        const parts = Array.isArray(list[i]?.parts) ? list[i].parts : [];
-        const completed = !!info.time?.completed;
-        return { hasReply: true, completed, partsCount: parts.length };
-      }
+  // 解析单条条目：返回 { kind:'idle'|'assistant'|null, outcome?, contentLen }
+  const parse = (entry) => {
+    if (!entry || typeof entry !== 'object') return { kind: null };
+    // v2 typed message
+    if (entry.type === 'idle') return { kind: 'idle', outcome: entry.outcome ?? null };
+    if (entry.type === 'assistant') {
+      const content = Array.isArray(entry.content) ? entry.content : [];
+      return { kind: 'assistant', contentLen: content.length, completedFlag: !!entry.time?.completed };
     }
-    return { hasReply: false, completed: false, partsCount: 0 };
-  } finally {
-    clearTimeout(t);
+    // v1 形状
+    const info = entry.info;
+    if (info?.role === 'assistant') {
+      const parts = Array.isArray(entry.parts) ? entry.parts : [];
+      return { kind: 'assistant', contentLen: parts.length, completedFlag: !!info.time?.completed };
+    }
+    return { kind: null };
+  };
+
+  // 统一按「时间升序」处理：V2 为 desc -> 反转；V1 本身为 asc。
+  const ordered = isV2 ? [...arr].reverse() : arr;
+
+  // 【F16 修复】若给了 fork 后的消息 ID 快照，只保留**不在快照中**的新增消息，
+  // 从而隔离 fork 继承的历史 idle（真机验证：副本消息 ID 会重写且 boundary 不在副本中，
+  // 故只能用 ID 集合差集，不能用 boundary messageID 定位）。
+  let scoped = ordered;
+  const baselineIds = opts.baselineIds;
+  if (baselineIds) {
+    const set = baselineIds instanceof Set ? baselineIds : new Set(baselineIds);
+    scoped = ordered.filter(e => e && e.id && !set.has(e.id));
   }
+
+  let lastAssistant = null;   // 最后一条 assistant 的解析结果
+  let lastIdle = null;        // 最后一条 idle 的解析结果
+  for (const entry of scoped) {
+    const p = parse(entry);
+    if (p.kind === 'assistant') lastAssistant = p;
+    else if (p.kind === 'idle') lastIdle = p;
+  }
+
+  // 信号 1（权威）：末条 idle 消息
+  if (lastIdle) {
+    const outcome = lastIdle.outcome;
+    const succeeded = outcome === 'succeeded';
+    return {
+      hasReply: !!lastAssistant,
+      completed: succeeded,
+      partsCount: lastAssistant?.contentLen || 0,
+      outcome: outcome ?? null,
+      status: succeeded ? 'success' : 'failed'
+    };
+  }
+
+  // 信号 2（回退）：末条 assistant 已完成且内容非空。仅用 completed，不再 OR streamed。
+  if (lastAssistant && lastAssistant.completedFlag && lastAssistant.contentLen > 0) {
+    return {
+      hasReply: true,
+      completed: true,
+      partsCount: lastAssistant.contentLen,
+      outcome: null,
+      status: 'success'
+    };
+  }
+
+  return {
+    hasReply: !!lastAssistant,
+    completed: false,
+    partsCount: lastAssistant?.contentLen || 0,
+    outcome: null,
+    status: 'incomplete'
+  };
 }
 
 /**
  * 轮询等待 fork 会话抽取完成。
- * prompt_async 为"发完即返回"，需主动轮询直到目标会话产出完成回复或超时。
- * 判定策略（双保险）：
- *   1. status 变为 idle —— 若宿主维护了该副本状态，最快信号；
- *   2. 最后一条 assistant 消息出现 time.completed 且 parts 非空 —— 通用可靠信号。
- * @param {Object} opts { pollIntervalMs=3000, maxWaitMs=300000, onWait? }
- * @returns {Promise<{completed:boolean, waitedMs:number, finalStatus:string}>}
+ *
+ * 判定策略（按版本分流——真机 F10/F11 确证的修复）：
+ *   - **V1**：宿主 `/session/status` 会维护 fork 副本状态，`status==='idle'` 是有效快速信号，
+ *     保留短路；同时保留消息完成度作双保险。
+ *   - **V2**：`/api/session/active` 只表示「有无活跃任务」，**不能**用于判完成（空 fork 也会立即
+ *     被判 idle → 秒短路丢数据）。故 V2 下**不再以 status 短路**，改由消息层的
+ *     `type:'idle'` 消息（+ outcome）或 assistant 完成度判定。
+ *
+ * @param {Object} opts { pollIntervalMs=3000, maxWaitMs=300000, onWait?, baselineIds? }
+ *   - baselineIds: fork 后对副本消息 ID 的快照集合（真机 F16）。传入后只考量
+ *     **不在该集合中**的新增消息，避免把 fork 副本**继承的历史 idle** 误当完成信号。
+ * @returns {Promise<{completed:boolean, waitedMs:number, finalStatus:string,
+ *                    outcome:string|null, status:'success'|'failed'|'incomplete'|'timeout', sawReply:boolean}>}
+ *   - completed=true 表示「抽取成功完成」（succeeded）；
+ *   - completed=false 且 status='failed' 表示「已结束但失败/中断」（不得当作抽取成功）；
+ *   - completed=false 且 status='timeout' 表示「超时未完成」（上层应可重试）。
  */
 export async function waitForSessionIdle(baseUrl, sessionId, opts = {}) {
   const pollIntervalMs = opts.pollIntervalMs || 3000;
   const maxWaitMs = opts.maxWaitMs || 300000;
+  const version = await resolveVersion(baseUrl);
+  const isV2 = version === OPENCODE_API_VERSION.V2;
   const start = Date.now();
   let lastStatus = 'unknown';
   let sawReply = false;
+  const progOpts = { baselineIds: opts.baselineIds };
 
   while (Date.now() - start < maxWaitMs) {
     await new Promise(r => setTimeout(r, pollIntervalMs));
     const waitedMs = Date.now() - start;
 
-    // 信号 1：宿主状态 idle
+    // 信号 1：宿主状态。V1 下 status==='idle' 是可靠完成信号（保留短路）；
+    // V2 下 status 只反映「有无活跃任务」，**不可**据此判完成（空 fork 会秒短路 → 丢数据）。
     let status = 'unknown';
     try {
       status = await getSessionStatus(baseUrl, sessionId);
@@ -498,22 +975,34 @@ export async function waitForSessionIdle(baseUrl, sessionId, opts = {}) {
       status = 'unknown';
     }
     lastStatus = status;
-    if (status === 'idle') {
-      return { completed: true, waitedMs, finalStatus: 'idle' };
+    if (!isV2 && status === 'idle') {
+      return { completed: true, waitedMs, finalStatus: 'idle', outcome: null, status: 'success', sawReply };
     }
 
-    // 信号 2：最后一条 assistant 消息已完成
+    // 信号 2：消息层完成判定（V2 主路径：type:'idle' 消息 + outcome；V1 双保险：assistant completed）
     try {
-      const prog = await getLastAssistantProgress(baseUrl, sessionId);
+      const prog = await getLastAssistantProgress(baseUrl, sessionId, undefined, progOpts);
+      if (prog.hasReply) sawReply = true;
+
+      // 已结束但失败/中断：立即返回，交上层置 FAILED（不得当成功）
+      if (prog.outcome === 'failed' || prog.outcome === 'interrupted') {
+        return {
+          completed: false, waitedMs, finalStatus: 'idle-message', outcome: prog.outcome,
+          status: 'failed', sawReply
+        };
+      }
+
       if (prog.completed && prog.partsCount > 0) {
         // 二次确认：间隔一个周期后仍未变化，避免"part 刚写入"的中间态误判
         await new Promise(r => setTimeout(r, Math.min(pollIntervalMs, 1500)));
-        const confirm = await getLastAssistantProgress(baseUrl, sessionId);
+        const confirm = await getLastAssistantProgress(baseUrl, sessionId, undefined, progOpts);
         if (confirm.completed && confirm.partsCount > 0) {
-          return { completed: true, waitedMs: Date.now() - start, finalStatus: 'completed' };
+          return {
+            completed: true, waitedMs: Date.now() - start, finalStatus: 'completed',
+            outcome: confirm.outcome ?? null, status: 'success', sawReply
+          };
         }
       }
-      if (prog.hasReply) sawReply = true;
     } catch {
       // 消息读取失败不致命，继续等待
     }
@@ -523,8 +1012,8 @@ export async function waitForSessionIdle(baseUrl, sessionId, opts = {}) {
     }
   }
 
-  // 超时兜底：若期间至少出现过 assistant 回复且已无新增迹象，视为大概完成
-  return { completed: false, waitedMs: Date.now() - start, finalStatus: lastStatus, sawReply };
+  // 超时兜底：明确标记为 timeout（非成功），上层据此置 FAILED 并可重试，杜绝静默腰斩。
+  return { completed: false, waitedMs: Date.now() - start, finalStatus: lastStatus, outcome: null, status: 'timeout', sawReply };
 }
 
 /**
@@ -533,6 +1022,8 @@ export async function waitForSessionIdle(baseUrl, sessionId, opts = {}) {
  */
 export async function deleteSession(baseUrl, sessionId, timeoutMs = 8000) {
   if (!sessionId) return false;
+  const version = await resolveVersion(baseUrl);
+  const ep = endpoints(version, sessionId);
   const auth = basicAuthHeader();
   const headers = {};
   if (auth) headers.Authorization = auth;
@@ -540,7 +1031,7 @@ export async function deleteSession(baseUrl, sessionId, timeoutMs = 8000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${baseUrl}/session/${encodeURIComponent(sessionId)}`, {
+    const res = await fetch(`${baseUrl}${ep.session}`, {
       method: 'DELETE',
       headers,
       signal: ctrl.signal
@@ -572,16 +1063,32 @@ export async function dispatchExtractionPrompt(baseUrl, opts = {}) {
     projectName: opts.projectName
   });
 
+  // dry-run 是纯桩：绝不发起任何网络请求（含版本探测），故先按缓存/配置推断版本，
+  // 不做主动探测。已探测过则用缓存版本，保证 URL 展示准确。
+  if (dryRun) {
+    const cached = versionCache.get(String(baseUrl).replace(/\/$/, ''));
+    const ep = endpoints(cached || OPENCODE_API_VERSION.V1, sessionId);
+    return { dryRun, url: `${baseUrl}${ep.prompt}`, prompt };
+  }
+
+  const version = await resolveVersion(baseUrl);
+  const ep = endpoints(version, sessionId);
+
   const payload = {
     dryRun,
-    url: `${baseUrl}/session/${encodeURIComponent(sessionId)}/prompt_async`,
+    url: `${baseUrl}${ep.prompt}`,
     prompt
   };
-  if (dryRun) return payload;
 
   const auth = basicAuthHeader();
   const headers = { 'content-type': 'application/json' };
   if (auth) headers.Authorization = auth;
+
+  // v2 prompt 合并了异步语义（返回 Inbox User 项且不阻塞），body 为扁平 { text }；
+  // v1 使用 prompt_async，body 为 { noReply, parts:[{type:'text',text}] }。
+  const body = version === OPENCODE_API_VERSION.V2
+    ? { text: prompt }
+    : { noReply: false, parts: [{ type: 'text', text: prompt }] };
 
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), opts.timeoutMs || 15000);
@@ -589,10 +1096,7 @@ export async function dispatchExtractionPrompt(baseUrl, opts = {}) {
     const res = await fetch(payload.url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        noReply: false,
-        parts: [{ type: 'text', text: prompt }]
-      }),
+      body: JSON.stringify(body),
       signal: ctrl.signal
     });
     clearTimeout(t);
@@ -611,19 +1115,22 @@ export async function dispatchExtractionPrompt(baseUrl, opts = {}) {
  * @returns {Promise<Object>} 创建的会话对象 (含 id, title, directory)
  */
 export async function createSession(baseUrl, opts = {}) {
+  const version = await resolveVersion(baseUrl);
+  const ep = endpoints(version);
   const auth = basicAuthHeader();
   const headers = { 'content-type': 'application/json' };
   if (auth) headers.Authorization = auth;
 
-  const body = {
-    title: opts.title || 'MemHub Task',
-    directory: opts.directory || process.cwd()
-  };
+  const directory = opts.directory || process.cwd();
+  // v2 将目录收进 location:{directory}；v1 使用顶层 directory。
+  const body = version === OPENCODE_API_VERSION.V2
+    ? { title: opts.title || 'MemHub Task', location: { directory } }
+    : { title: opts.title || 'MemHub Task', directory };
 
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), opts.timeoutMs || 15000);
   try {
-    const res = await fetch(`${baseUrl}/session`, {
+    const res = await fetch(`${baseUrl}${ep.listSessions}`, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -631,7 +1138,7 @@ export async function createSession(baseUrl, opts = {}) {
     });
     clearTimeout(t);
     if (!res.ok) throw new Error(`创建独立会话失败 HTTP ${res.status}`);
-    return await res.json();
+    return normalizeSession(unwrap(await res.json()));
   } finally {
     clearTimeout(t);
   }
@@ -647,20 +1154,23 @@ export async function createSession(baseUrl, opts = {}) {
  */
 export async function dispatchSessionPrompt(baseUrl, sessionId, promptText, opts = {}) {
   if (!sessionId) throw new Error('dispatchSessionPrompt: 缺少必须的 sessionId');
+  const version = await resolveVersion(baseUrl);
+  const ep = endpoints(version, sessionId);
   const auth = basicAuthHeader();
   const headers = { 'content-type': 'application/json' };
   if (auth) headers.Authorization = auth;
 
+  const body = version === OPENCODE_API_VERSION.V2
+    ? { text: promptText }
+    : { noReply: false, parts: [{ type: 'text', text: promptText }] };
+
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), opts.timeoutMs || 20000);
   try {
-    const res = await fetch(`${baseUrl}/session/${encodeURIComponent(sessionId)}/prompt_async`, {
+    const res = await fetch(`${baseUrl}${ep.prompt}`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        noReply: false,
-        parts: [{ type: 'text', text: promptText }]
-      }),
+      body: JSON.stringify(body),
       signal: ctrl.signal
     });
     clearTimeout(t);
