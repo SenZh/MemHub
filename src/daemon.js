@@ -489,6 +489,11 @@ export function runDaemonForeground(cliOptions = {}) {
             // 超时未完成：置 FAILED（可重试），绝不当成功，杜绝静默腰斩与假状态
             console.warn(`   ⚠️ fork 副本等待超时 (最终状态: ${waited.finalStatus})，本次不计入已抽取`);
           }
+          // 异常可观测：若轮询期间出现过 HTTP/网络异常（如 401 未授权、500），明确告警，
+          // 避免"异常被静默吞掉、只表现为超时"的排查困难。
+          if (waited.lastError) {
+            console.warn(`   ⚠️ 轮询期间出现过异常（可能影响抽取）: ${waited.lastError}`);
+          }
 
           // 仅「抽取成功」才置 EXTRACTED；失败/超时一律 FAILED，保证可重试
           if (waited.completed) {

@@ -474,7 +474,33 @@ try {
     }
   }
 
-  console.log('\n🎉 OpenCode V2 适配（含 R1/R2/R3/R11/F16/F17 回归）全部断言通过！');
+  // T8. P1-2 回归：轮询期间出现 HTTP 异常（如 401）时，须透出 lastError（不得静默吞错）
+  console.log('20. [T8] 轮询异常须透出 lastError（杜绝静默吞错）...');
+  {
+    // 独立 mock：所有消息端点返回 401（模拟未授权）
+    const auth401 = http.createServer((req, res) => {
+      const p = req.url.split('?')[0];
+      if (p === '/api/info') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ version: '2.0.3', pid: 1, urls: [], paths: { tmp: '/tmp' } })); }
+      if (p.startsWith('/global/health')) { res.writeHead(404); return res.end('{}'); }
+      if (p === '/api/session/active') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ data: {} })); }
+      // 消息端点：401
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'unauthorized' }));
+    });
+    const a401port = await new Promise(r => auth401.listen(0, '127.0.0.1', () => r(auth401.address().port)));
+    const a401url = `http://127.0.0.1:${a401port}`;
+    try {
+      const w = await waitForSessionIdle(a401url, 'ses-401', { pollIntervalMs: 100, maxWaitMs: 500 });
+      assert.equal(w.completed, false, '401 时不得判完成');
+      assert.equal(w.status, 'timeout');
+      assert(w.lastError && w.lastError.includes('401'), `应透出含 401 的 lastError，实际 ${w.lastError}`);
+      console.log(`   ✅ 异常被观测到并透出: ${w.lastError}`);
+    } finally {
+      await new Promise(r => auth401.close(r));
+    }
+  }
+
+  console.log('\n🎉 OpenCode V2 适配（含 R1/R2/R3/R11/F16/F17 + P1 加固）全部断言通过！');
 } finally {
   clearApiVersionCache();
   await stopMock();

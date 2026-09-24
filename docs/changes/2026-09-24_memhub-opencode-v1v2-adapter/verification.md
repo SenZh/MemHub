@@ -267,6 +267,19 @@ fork 副本消息（100 条，desc）：
   - 1 个 `outcome=failed`（就是本会话的 fork 评审子会话）→ `completed=false, status='failed'` ✅
 - **证明 failed 分支真机可触发且被正确识别**（不再当成功）。
 
+### F21. ✅ 「流式中间态」真机实锤：assistant 可处于「有 streamed 无 completed」
+```json
+type=assistant  time={"created":1790232546011,"streamed":1790232552768}   ← 无 completed，正在流式
+type=assistant  time={"created":1790232539838,"streamed":...,"completed":1790232545661}  ← 已完成
+```
+- 这是历次评审一直「未抓到」的中间态，本轮真机观测到。
+- **结论坐实 R3 修复的正确性**：若沿用旧代码 `completed || streamed` 的 OR 判定，
+  这条**正在流式**的消息会被误判为「已完成」。现已仅认 `completed`，中间态正确判为未完成。
+
+### F22. ✅ 会话消息时间字段统一为 `time.created`（可用于排序与「最新信号」判定）
+- 真机采样：assistant / user / idle 均带 `time.created`（assistant 另有 `streamed`/`completed`）。
+- 佐证 `getLastAssistantProgress` 统一按 `time.created` 升序处理、取「最新 idle」的语义正确性。
+
 ---
 
 ## 4. 校验方法学声明

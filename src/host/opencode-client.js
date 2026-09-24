@@ -892,8 +892,25 @@ export async function getLastAssistantProgress(baseUrl, sessionId, timeoutMs = 8
     scoped = ordered.filter(e => e && e.id && !set.has(e.id));
   }
 
-  let lastAssistant = null;   // 最后一条 assistant 的解析结果
-  let lastIdle = null;        // 最后一条 idle 的解析结果
+  // 防御性去重：cursor 翻页在极端情况下可能返回跨页重复条目（如 limit 降级后重试边界），
+  // 按 id 去重可保证判定只基于唯一消息。注意：仅对「有 id」的条目去重，
+  // 无 id 的条目（如部分 V1 宿主返回的裸消息）全部保留，避免误删导致 V1 判定失效。
+  {
+    const seen = new Set();
+    scoped = scoped.filter(e => {
+      const id = e && e.id;
+      if (!id) return true;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }
+
+  // 收集完成信号：scoped 已按时间升序，故遍历后各变量的末值即「最新的该类消息」。
+  // - 有 baselineIds 时 scoped 仅含本次新增消息，「最新 idle」即本次任务完成信号；
+  // - 无 baseline（V1 场景）时 scoped 为全量，「最新 idle」即该会话最后一次任务结束。
+  let lastAssistant = null;   // 最新一条 assistant 的解析结果
+  let lastIdle = null;        // 最新一条 idle 的解析结果
   for (const entry of scoped) {
     const p = parse(entry);
     if (p.kind === 'assistant') lastAssistant = p;
@@ -947,10 +964,13 @@ export async function getLastAssistantProgress(baseUrl, sessionId, timeoutMs = 8
  *   - baselineIds: fork 后对副本消息 ID 的快照集合（真机 F16）。传入后只考量
  *     **不在该集合中**的新增消息，避免把 fork 副本**继承的历史 idle** 误当完成信号。
  * @returns {Promise<{completed:boolean, waitedMs:number, finalStatus:string,
- *                    outcome:string|null, status:'success'|'failed'|'incomplete'|'timeout', sawReply:boolean}>}
+ *                    outcome:string|null, status:'success'|'failed'|'incomplete'|'timeout',
+ *                    sawReply:boolean, lastError:string|null}>}
  *   - completed=true 表示「抽取成功完成」（succeeded）；
  *   - completed=false 且 status='failed' 表示「已结束但失败/中断」（不得当作抽取成功）；
- *   - completed=false 且 status='timeout' 表示「超时未完成」（上层应可重试）。
+ *   - completed=false 且 status='timeout' 表示「超时未完成」（上层应可重试）；
+ *   - lastError 非空表示轮询期间出现过 HTTP/网络异常（如 401 未授权）——供上层告警，
+ *     避免"异常被静默吞掉、只表现为超时"的不可观测问题。
  */
 export async function waitForSessionIdle(baseUrl, sessionId, opts = {}) {
   const pollIntervalMs = opts.pollIntervalMs || 3000;
@@ -960,6 +980,7 @@ export async function waitForSessionIdle(baseUrl, sessionId, opts = {}) {
   const start = Date.now();
   let lastStatus = 'unknown';
   let sawReply = false;
+  let lastError = null;   // 记录轮询期间最后一次异常消息（供上层告警，杜绝静默吞错）
   const progOpts = { baselineIds: opts.baselineIds };
 
   while (Date.now() - start < maxWaitMs) {
@@ -971,12 +992,13 @@ export async function waitForSessionIdle(baseUrl, sessionId, opts = {}) {
     let status = 'unknown';
     try {
       status = await getSessionStatus(baseUrl, sessionId);
-    } catch {
+    } catch (e) {
       status = 'unknown';
+      lastError = `getSessionStatus: ${e.message}`;
     }
     lastStatus = status;
     if (!isV2 && status === 'idle') {
-      return { completed: true, waitedMs, finalStatus: 'idle', outcome: null, status: 'success', sawReply };
+      return { completed: true, waitedMs, finalStatus: 'idle', outcome: null, status: 'success', sawReply, lastError };
     }
 
     // 信号 2：消息层完成判定（V2 主路径：type:'idle' 消息 + outcome；V1 双保险：assistant completed）
@@ -988,7 +1010,7 @@ export async function waitForSessionIdle(baseUrl, sessionId, opts = {}) {
       if (prog.outcome === 'failed' || prog.outcome === 'interrupted') {
         return {
           completed: false, waitedMs, finalStatus: 'idle-message', outcome: prog.outcome,
-          status: 'failed', sawReply
+          status: 'failed', sawReply, lastError
         };
       }
 
@@ -999,12 +1021,13 @@ export async function waitForSessionIdle(baseUrl, sessionId, opts = {}) {
         if (confirm.completed && confirm.partsCount > 0) {
           return {
             completed: true, waitedMs: Date.now() - start, finalStatus: 'completed',
-            outcome: confirm.outcome ?? null, status: 'success', sawReply
+            outcome: confirm.outcome ?? null, status: 'success', sawReply, lastError
           };
         }
       }
-    } catch {
-      // 消息读取失败不致命，继续等待
+    } catch (e) {
+      // 消息读取失败不致命，继续等待；但记录异常供上层告警（不再静默吞错）
+      lastError = `getLastAssistantProgress: ${e.message}`;
     }
 
     if (typeof opts.onWait === 'function') {
@@ -1013,7 +1036,7 @@ export async function waitForSessionIdle(baseUrl, sessionId, opts = {}) {
   }
 
   // 超时兜底：明确标记为 timeout（非成功），上层据此置 FAILED 并可重试，杜绝静默腰斩。
-  return { completed: false, waitedMs: Date.now() - start, finalStatus: lastStatus, outcome: null, status: 'timeout', sawReply };
+  return { completed: false, waitedMs: Date.now() - start, finalStatus: lastStatus, outcome: null, status: 'timeout', sawReply, lastError };
 }
 
 /**
