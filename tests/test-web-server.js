@@ -79,7 +79,9 @@ async function runTests() {
     assert.strictEqual(indexRes.statusCode, 200, 'GET / 必须返回 200');
     assert(indexRes.headers['content-type'].includes('text/html'), 'Content-Type 必须为 text/html');
     assert(indexRes.data.includes('MemHub'), 'HTML 必须包含 MemHub 标题');
-    console.log('   ✅ GET / 静态首页加载成功');
+    assert(indexRes.data.includes('knowledge-pagination'), 'HTML 必须包含知识全景分页控件');
+    assert(indexRes.data.includes('modal-markdown-rendered'), 'HTML 必须包含 Markdown 渲染容器');
+    console.log('   ✅ GET / 静态首页加载成功 (包含分页与 Markdown 渲染容器)');
 
     // 路径穿越攻击防御测试
     const traversalRes = await request(TEST_PORT, { path: '/../../package.json' });
@@ -123,7 +125,12 @@ async function runTests() {
     assert(listRes.json.success === true);
     assert(Array.isArray(listRes.json.data.items));
     assert(listRes.json.data.limit === 5);
-    console.log(`   ✅ /api/knowledge 成功获取 ${listRes.json.data.items.length} 条记录 (status=all, limit=5)`);
+    if (listRes.json.data.items.length > 0) {
+      const item = listRes.json.data.items[0];
+      assert(typeof item.time_created === 'number', '列表中条目必须具备 time_created 数值');
+      assert(typeof item.created_at === 'number', '列表中条目必须具备 created_at 兼容数值');
+    }
+    console.log(`   ✅ /api/knowledge 成功获取 ${listRes.json.data.items.length} 条记录 (status=all, limit=5, 兼容 time_created 与 created_at)`);
 
     // 5. 验证 GET /api/knowledge/:id 详情读取
     console.log('\n--- 5. 验证 GET /api/knowledge/:id 详情接口 ---');
@@ -159,13 +166,19 @@ async function runTests() {
       console.log(`   ✅ 首条综合得分 (RRF Score): ${searchRes.json.data.items[0].score}`);
     }
 
-    // 7. 验证 GET /api/audit MCP 审计流水
-    console.log('\n--- 7. 验证 GET /api/audit MCP 审计流水接口 ---');
+    // 7. 验证 GET /api/audit MCP 审计流水与参数过滤
+    console.log('\n--- 7. 验证 GET /api/audit MCP 审计流水与参数过滤 ---');
     const auditRes = await request(TEST_PORT, { path: '/api/audit?limit=10' });
     assert.strictEqual(auditRes.statusCode, 200);
     assert(auditRes.json.success === true);
     assert(Array.isArray(auditRes.json.data.logs));
     console.log(`   ✅ /api/audit 成功获取 ${auditRes.json.data.logs.length} 条 MCP 调用流水`);
+
+    const auditFilterRes = await request(TEST_PORT, { path: '/api/audit?tool=memhub_search&limit=5&offset=0' });
+    assert.strictEqual(auditFilterRes.statusCode, 200);
+    assert(auditFilterRes.json.success === true);
+    assert(Array.isArray(auditFilterRes.json.data.logs));
+    console.log(`   ✅ /api/audit 带有 tool=memhub_search 与 offset=0 参数过滤正常响应`);
 
     // 8. 验证安全门禁：1MB 流式 Body 熔断机制
     console.log('\n--- 8. 验证安全门禁：1MB 超限 Body 熔断机制 ---');

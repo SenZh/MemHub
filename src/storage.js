@@ -765,6 +765,7 @@ export function syncEmbeddings(customDb = null) {
 }
 
 function formatL1Result(row, score = null) {
+  const timeCreated = Number(row.time_created);
   const res = {
     id: row.id,
     title: row.title,
@@ -773,7 +774,8 @@ function formatL1Result(row, score = null) {
     tags: JSON.parse(row.tags || '[]'),
     summary: row.summary,
     related_files: JSON.parse(row.related_files || '[]'),
-    created_at: Number(row.time_created)
+    created_at: timeCreated,
+    time_created: timeCreated
   };
   if (row.status !== undefined) res.status = row.status;
   if (row.consolidated_into !== undefined) res.consolidated_into = row.consolidated_into;
@@ -929,6 +931,7 @@ export function getKnowledge(id) {
     tags,
     related_files: relatedFiles,
     time_created: Number(item.time_created),
+    created_at: Number(item.time_created),
     time_updated: Number(item.time_updated),
     content: markdownView
   };
@@ -1293,7 +1296,8 @@ export function logMcpAccess(logEntry = {}) {
 export function getMcpAuditLogs(options = {}) {
   const db = getDatabase();
   const limit = Math.min(Math.max(Number(options.limit) || 20, 1), 200);
-  const toolName = options.tool || null;
+  const offset = Math.max(Number(options.offset) || 0, 0);
+  const toolName = options.tool || options.toolName || null;
   const project = options.project || null;
 
   let sql = `SELECT * FROM mcp_audit_logs WHERE 1=1`;
@@ -1308,8 +1312,8 @@ export function getMcpAuditLogs(options = {}) {
     params.push(project);
   }
 
-  sql += ` ORDER BY created_at DESC LIMIT ?`;
-  params.push(limit);
+  sql += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+  params.push(limit, offset);
 
   return db.prepare(sql).all(...params);
 }

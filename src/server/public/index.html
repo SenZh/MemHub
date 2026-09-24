@@ -221,6 +221,19 @@
       <div id="knowledge-list" class="space-y-3">
         <!-- JS 动态注入卡片 -->
       </div>
+
+      <!-- 分页控制栏 -->
+      <div id="knowledge-pagination" class="flex items-center justify-between pt-3 text-xs text-slate-500 border-t border-slate-200/60">
+        <span id="knowledge-page-info">第 1 页</span>
+        <div class="flex items-center space-x-2">
+          <button id="btn-prev-page" onclick="prevKnowledgePage()" disabled class="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 font-medium transition cursor-pointer shadow-xs">
+            ← 上一页
+          </button>
+          <button id="btn-next-page" onclick="nextKnowledgePage()" disabled class="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 font-medium transition cursor-pointer shadow-xs">
+            下一页 →
+          </button>
+        </div>
+      </div>
     </section>
 
     <!-- TAB 3: 混合检索实验室 -->
@@ -340,7 +353,7 @@
         <div class="flex flex-wrap gap-2 text-xs" id="modal-tags"></div>
 
         <div class="border-t border-slate-100 pt-4">
-          <pre id="modal-markdown" class="whitespace-pre-wrap font-sans text-xs bg-slate-50 p-4 rounded-xl border border-slate-200 text-slate-800 leading-relaxed overflow-x-auto"></pre>
+          <div id="modal-markdown-rendered" class="space-y-2 text-xs text-slate-800 leading-relaxed overflow-x-auto"></div>
         </div>
       </div>
 
@@ -361,6 +374,100 @@
     let currentTab = 'dashboard';
     let currentCategoryFilter = '';
     let currentDetailItem = null;
+    let currentKnowledgePage = 0;
+    const KNOWLEDGE_PAGE_SIZE = 20;
+
+    function escapeHtml(str) {
+      return (str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function renderMarkdown(content) {
+      if (!content) return '<p class="text-slate-400 text-xs">无正文内容</p>';
+
+      const codeBlocks = [];
+      let text = content.replace(/```([\w-]*)\r?\n([\s\S]*?)```/g, (_, lang, code) => {
+        const placeholder = `%%CODE_BLOCK_${codeBlocks.length}%%`;
+        codeBlocks.push({
+          lang: escapeHtml(lang),
+          code: escapeHtml(code.replace(/\n$/, ''))
+        });
+        return placeholder;
+      });
+
+      const lines = text.split(/\r?\n/);
+      const out = [];
+      let inList = false;
+
+      for (let i = 0; i < lines.length; i++) {
+        let line = lines[i];
+
+        const cbMatch = line.match(/^%%CODE_BLOCK_(\d+)%%$/);
+        if (cbMatch) {
+          if (inList) { out.push('</ul>'); inList = false; }
+          const cb = codeBlocks[Number(cbMatch[1])];
+          out.push(`
+            <div class="my-3 rounded-lg overflow-hidden border border-slate-700/60 bg-slate-900 text-slate-100 shadow-xs">
+              ${cb.lang ? `<div class="bg-slate-800/80 px-3 py-1 text-[10px] font-mono text-slate-400 border-b border-slate-700/50">${cb.lang}</div>` : ''}
+              <pre class="p-3 text-xs overflow-x-auto font-mono leading-relaxed"><code>${cb.code}</code></pre>
+            </div>
+          `);
+          continue;
+        }
+
+        const headerMatch = line.match(/^(#{1,4})\s+(.+)$/);
+        if (headerMatch) {
+          if (inList) { out.push('</ul>'); inList = false; }
+          const level = headerMatch[1].length;
+          const title = escapeHtml(headerMatch[2]);
+          if (level === 1) {
+            out.push(`<h1 class="text-sm font-bold text-slate-900 mt-4 mb-2 pb-1 border-b border-slate-200">${title}</h1>`);
+          } else if (level === 2) {
+            out.push(`<h2 class="text-xs font-bold text-slate-800 mt-3 mb-1 flex items-center space-x-1">${title}</h2>`);
+          } else {
+            out.push(`<h3 class="text-xs font-semibold text-slate-800 mt-2 mb-1">${title}</h3>`);
+          }
+          continue;
+        }
+
+        const listMatch = line.match(/^[-*]\s+(.+)$/);
+        if (listMatch) {
+          if (!inList) {
+            out.push('<ul class="list-disc list-inside space-y-1 my-1.5 text-xs text-slate-700">');
+            inList = true;
+          }
+          let itemText = escapeHtml(listMatch[1]);
+          itemText = itemText.replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 rounded bg-slate-100 text-emerald-800 font-mono text-[11px] border border-slate-200">$1</code>');
+          itemText = itemText.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>');
+          out.push(`<li>${itemText}</li>`);
+          continue;
+        }
+
+        if (inList) {
+          out.push('</ul>');
+          inList = false;
+        }
+
+        if (/^---+$/.test(line.trim())) {
+          out.push('<hr class="my-3 border-slate-200" />');
+          continue;
+        }
+
+        if (!line.trim()) continue;
+
+        let pText = escapeHtml(line);
+        pText = pText.replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 rounded bg-slate-100 text-emerald-800 font-mono text-[11px] border border-slate-200">$1</code>');
+        pText = pText.replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>');
+        out.push(`<p class="text-xs leading-relaxed text-slate-700 my-1">${pText}</p>`);
+      }
+
+      if (inList) out.push('</ul>');
+      return out.join('\n');
+    }
 
     // 初始化加载
     window.addEventListener('DOMContentLoaded', () => {
@@ -424,47 +531,59 @@
 
         const { dbPath, dbSizeBytes, stats } = json.data;
 
-        document.getElementById('stat-total-knowledge').innerText = stats.total_knowledge_entries || 0;
-        document.getElementById('stat-db-size').innerText = formatBytes(dbSizeBytes);
-        document.getElementById('stat-db-path').innerText = dbPath || '';
-        document.getElementById('stat-db-path').title = dbPath || '';
+        const setElText = (id, val) => {
+          const el = document.getElementById(id);
+          if (el) el.innerText = val !== undefined && val !== null ? val : '-';
+        };
 
-        // 做梦引擎成效
+        setElText('stat-total-knowledge', stats.total_knowledge_entries || 0);
+        setElText('stat-db-size', formatBytes(dbSizeBytes));
+        const dbPathEl = document.getElementById('stat-db-path');
+        if (dbPathEl) {
+          dbPathEl.innerText = dbPath || '';
+          dbPathEl.title = dbPath || '';
+        }
+
+        // 做梦引擎成效 (安全防护，DOM 缺失时不中断)
         const dreaming = stats.dreaming || {};
-        document.getElementById('stat-l4-count').innerText = dreaming.synthesized_l4 || 0;
-        document.getElementById('dream-archived').innerText = dreaming.consolidated_fragments || 0;
+        setElText('stat-l4-count', dreaming.synthesized_l4 || 0);
+        setElText('dream-archived', dreaming.consolidated_fragments || 0);
         const ratio = dreaming.candidate_pool > 0 ? ((dreaming.consolidated_fragments / (dreaming.candidate_pool + dreaming.consolidated_fragments)) * 100).toFixed(1) : 0;
-        document.getElementById('dream-ratio').innerText = `${ratio}%`;
-        document.getElementById('dream-rounds').innerText = dreaming.dream_rounds || 0;
-        document.getElementById('dream-pool').innerText = dreaming.candidate_pool || 0;
+        setElText('dream-ratio', `${ratio}%`);
+        setElText('dream-rounds', dreaming.dream_rounds || 0);
+        setElText('dream-pool', dreaming.candidate_pool || 0);
 
         // 会话萃取状态
         const sessions = stats.sessions_scanned || [];
         const extracted = (sessions.find(s => s.status === 'EXTRACTED') || {}).count || 0;
         const skipped = (sessions.find(s => s.status === 'SKIPPED') || {}).count || 0;
-        document.getElementById('stat-sessions').innerText = `${extracted} / ${extracted + skipped}`;
+        setElText('stat-sessions', `${extracted} / ${extracted + skipped}`);
 
         // 分类占比渲染与动态分类选择器
         const catMap = { default: '📌 默认', learnings: '💥 排错避坑', decisions: '🏛️ 架构决策', patterns: '⚙️ 代码模板', business: '📜 业务规则' };
         const totalEntries = stats.total_knowledge_entries || 1;
         const catContainer = document.getElementById('category-bars');
-        catContainer.innerHTML = '';
+        if (catContainer) {
+          catContainer.innerHTML = '';
+        }
         
         const activeCategories = (stats.categories || []).filter(c => c.count > 0);
-        activeCategories.forEach(c => {
-          const pct = Math.round((c.count / totalEntries) * 100);
-          catContainer.innerHTML += `
-            <div>
-              <div class="flex justify-between text-xs mb-1">
-                <span class="text-slate-700 font-medium">${catMap[c.category] || c.category}</span>
-                <span class="text-slate-500 font-mono">${c.count} 条 (${pct}%)</span>
+        if (catContainer) {
+          activeCategories.forEach(c => {
+            const pct = Math.round((c.count / totalEntries) * 100);
+            catContainer.innerHTML += `
+              <div>
+                <div class="flex justify-between text-xs mb-1">
+                  <span class="text-slate-700 font-medium">${catMap[c.category] || c.category}</span>
+                  <span class="text-slate-500 font-mono">${c.count} 条 (${pct}%)</span>
+                </div>
+                <div class="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div class="h-full bg-emerald-500 rounded-full" style="width: ${pct}%"></div>
+                </div>
               </div>
-              <div class="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                <div class="h-full bg-emerald-500 rounded-full" style="width: ${pct}%"></div>
-              </div>
-            </div>
-          `;
-        });
+            `;
+          });
+        }
 
         // 动态渲染分类筛选栏 (仅展示库中真实有数据的分类，杜绝出现 0 条数据的空分类)
         const filterBar = document.getElementById('category-filter-bar');
@@ -483,40 +602,47 @@
 
         // MCP 工具调用
         const mcpContainer = document.getElementById('mcp-tool-stats');
-        mcpContainer.innerHTML = '';
-        (stats.mcp_tool_calls || []).forEach(tool => {
-          mcpContainer.innerHTML += `
-            <div class="flex items-center justify-between text-xs py-1">
-              <span class="font-mono text-slate-700 font-medium">${tool.tool_name}</span>
-              <div class="flex items-center space-x-3 text-slate-500 font-mono">
-                <span>${tool.count} 次</span>
-                <span class="text-emerald-600 font-semibold">${tool.avg_duration_ms ? tool.avg_duration_ms.toFixed(1) + 'ms' : '-'}</span>
+        if (mcpContainer) {
+          mcpContainer.innerHTML = '';
+          (stats.mcp_tool_calls || []).forEach(tool => {
+            mcpContainer.innerHTML += `
+              <div class="flex items-center justify-between text-xs py-1">
+                <span class="font-mono text-slate-700 font-medium">${tool.tool_name}</span>
+                <div class="flex items-center space-x-3 text-slate-500 font-mono">
+                  <span>${tool.count} 次</span>
+                  <span class="text-emerald-600 font-semibold">${tool.avg_duration_ms ? tool.avg_duration_ms.toFixed(1) + 'ms' : '-'}</span>
+                </div>
               </div>
-            </div>
-          `;
-        });
-        document.getElementById('saved-tokens-est').innerText = `已节省约: ${((stats.estimated_saved_tokens || 0) / 1000).toFixed(0)}k Tokens`;
+            `;
+          });
+        }
+        setElText('saved-tokens-est', `已节省约: ${((stats.estimated_saved_tokens || 0) / 1000).toFixed(0)}k Tokens`);
 
         // 项目资产分布矩阵 (表头与内容动态对齐有数据的分类)
         const matrixHeader = document.getElementById('project-matrix-header');
-        let headerHtml = `<th class="px-5 py-3">项目标识 (Project)</th>`;
-        activeCategories.forEach(c => {
-          headerHtml += `<th class="px-5 py-3">${catMap[c.category] || c.category}</th>`;
-        });
-        headerHtml += `<th class="px-5 py-3 text-right">资产总计</th>`;
-        matrixHeader.innerHTML = headerHtml;
+        if (matrixHeader) {
+          let headerHtml = `<th class="px-5 py-3">项目标识 (Project)</th>`;
+          activeCategories.forEach(c => {
+            headerHtml += `<th class="px-5 py-3">${catMap[c.category] || c.category}</th>`;
+          });
+          headerHtml += `<th class="px-5 py-3 text-right">资产总计</th>`;
+          matrixHeader.innerHTML = headerHtml;
+        }
 
         const matrixBody = document.getElementById('project-matrix-body');
-        matrixBody.innerHTML = '';
-        (stats.projects || []).forEach(p => {
-          let rowHtml = `<tr class="hover:bg-slate-50/80 transition"><td class="px-5 py-3 font-semibold text-slate-900">${p.project}</td>`;
-          activeCategories.forEach(c => {
-            rowHtml += `<td class="px-5 py-3 text-slate-600">${p[c.category] || 0}</td>`;
+        if (matrixBody) {
+          matrixBody.innerHTML = '';
+          (stats.projects || []).forEach(p => {
+            let rowHtml = `<tr class="hover:bg-slate-50/80 transition"><td class="px-5 py-3 font-semibold text-slate-900">${p.project}</td>`;
+            activeCategories.forEach(c => {
+              rowHtml += `<td class="px-5 py-3 text-slate-600">${p[c.category] || 0}</td>`;
+            });
+            rowHtml += `<td class="px-5 py-3 text-right font-bold text-emerald-700">${p.total || 0}</td></tr>`;
+            matrixBody.innerHTML += rowHtml;
           });
-          rowHtml += `<td class="px-5 py-3 text-right font-bold text-emerald-700">${p.total || 0}</td></tr>`;
-          matrixBody.innerHTML += rowHtml;
-        });
+        }
       } catch (e) {
+        console.error('加载态势大盘异常:', e);
         showToast('加载态势看板失败', 'error');
       }
     }
@@ -524,7 +650,8 @@
     // 设置分类过滤 Pill
     function setCategoryFilter(cat) {
       currentCategoryFilter = cat;
-      loadKnowledge();
+      currentKnowledgePage = 0;
+      loadKnowledge(true);
       loadStats();
     }
 
@@ -549,22 +676,33 @@
       return `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">🟢 有效</span>`;
     }
 
+    // 分页前后翻页
+    function prevKnowledgePage() {
+      if (currentKnowledgePage > 0) {
+        currentKnowledgePage--;
+        loadKnowledge(false);
+      }
+    }
+
+    function nextKnowledgePage() {
+      currentKnowledgePage++;
+      loadKnowledge(false);
+    }
+
     // 加载知识全景列表
-    async function loadKnowledge() {
-      const status = document.getElementById('filter-status').value;
-      const project = document.getElementById('filter-project').value.trim();
-      const tag = document.getElementById('filter-tag').value.trim();
+    async function loadKnowledge(resetPage = false) {
+      if (resetPage) currentKnowledgePage = 0;
+      const status = document.getElementById('filter-status')?.value || 'active';
+      const project = document.getElementById('filter-project')?.value.trim() || '';
+      const tag = document.getElementById('filter-tag')?.value.trim() || '';
 
       const params = new URLSearchParams();
-      if (currentCategoryFilter === 'l4') {
-        params.set('status', 'l4');
-      } else {
-        if (currentCategoryFilter) params.set('category', currentCategoryFilter);
-        if (status) params.set('status', status);
-      }
+      if (currentCategoryFilter) params.set('category', currentCategoryFilter);
+      if (status) params.set('status', status);
       if (project) params.set('project', project);
       if (tag) params.set('tag', tag);
-      params.set('limit', '50');
+      params.set('limit', String(KNOWLEDGE_PAGE_SIZE));
+      params.set('offset', String(currentKnowledgePage * KNOWLEDGE_PAGE_SIZE));
 
       try {
         const res = await fetch(`/api/knowledge?${params.toString()}`);
@@ -572,16 +710,28 @@
         if (!json.success) return showToast(json.error, 'error');
 
         const container = document.getElementById('knowledge-list');
+        if (!container) return;
         container.innerHTML = '';
 
-        if (!json.data.items || json.data.items.length === 0) {
+        const items = json.data.items || [];
+
+        // 更新分页栏状态
+        const prevBtn = document.getElementById('btn-prev-page');
+        const nextBtn = document.getElementById('btn-next-page');
+        const pageInfo = document.getElementById('knowledge-page-info');
+        if (prevBtn) prevBtn.disabled = currentKnowledgePage === 0;
+        if (nextBtn) nextBtn.disabled = items.length < KNOWLEDGE_PAGE_SIZE;
+        if (pageInfo) pageInfo.innerText = `第 ${currentKnowledgePage + 1} 页 (本页 ${items.length} 条)`;
+
+        if (items.length === 0) {
           container.innerHTML = `<div class="text-center py-12 text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl bg-white">暂无符合条件的工程记忆卡片</div>`;
           return;
         }
 
-        json.data.items.forEach(item => {
+        items.forEach(item => {
           const tagsHtml = (item.tags || []).map(t => `<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-mono border border-slate-200/60">#${t}</span>`).join(' ');
-          const dateStr = item.created_at ? new Date(item.created_at).toLocaleString('zh-CN', { hour12: false }) : '-';
+          const ts = item.time_created || item.created_at;
+          const dateStr = ts ? new Date(Number(ts)).toLocaleString('zh-CN', { hour12: false }) : '-';
           
           container.innerHTML += `
             <div data-card-id="${item.id}" onclick="openDetail('${item.id}')" class="bg-white hover:bg-slate-50 border border-slate-200/80 hover:border-slate-300 rounded-xl p-4 cursor-pointer transition shadow-xs hover:shadow space-y-2.5">
@@ -603,6 +753,7 @@
           `;
         });
       } catch (e) {
+        console.error('加载知识列表异常:', e);
         showToast('加载知识列表失败', 'error');
       }
     }
@@ -642,6 +793,8 @@
         items.forEach((item, index) => {
           const tagsHtml = (item.tags || []).map(t => `<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-mono border border-slate-200/60">#${t}</span>`).join(' ');
           const scoreStr = item.score !== undefined ? `RRF 得分: ${item.score}` : '';
+          const ts = item.time_created || item.created_at;
+          const dateStr = ts ? new Date(Number(ts)).toLocaleString('zh-CN', { hour12: false }) : '';
 
           container.innerHTML += `
             <div data-card-id="${item.id}" onclick="openDetail('${item.id}')" class="bg-white hover:bg-slate-50 border border-slate-200/80 hover:border-slate-300 rounded-xl p-4 cursor-pointer transition shadow-xs hover:shadow space-y-2">
@@ -653,7 +806,10 @@
                   ${getStatusBadge(item)}
                   <span class="text-xs font-mono text-slate-400">${item.id}</span>
                 </div>
-                <span class="text-xs font-mono text-emerald-700 font-bold">${scoreStr}</span>
+                <div class="flex items-center space-x-3">
+                  ${dateStr ? `<span class="text-[11px] text-slate-400 font-mono">${dateStr}</span>` : ''}
+                  <span class="text-xs font-mono text-emerald-700 font-bold">${scoreStr}</span>
+                </div>
               </div>
               <h4 class="text-sm font-bold text-slate-900">${item.title}</h4>
               <p class="text-xs text-slate-600 line-clamp-2 leading-relaxed">${item.summary || ''}</p>
@@ -686,8 +842,12 @@
         const tagsContainer = document.getElementById('modal-tags');
         tagsContainer.innerHTML = (item.tags || []).map(t => `<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-mono border border-slate-200 text-xs">#${t}</span>`).join(' ');
 
-        document.getElementById('modal-markdown').innerText = item.content || '无正文渲染内容';
-        document.getElementById('modal-time').innerText = `录入时间: ${new Date(item.time_created).toLocaleString('zh-CN', { hour12: false })}`;
+        const contentEl = document.getElementById('modal-markdown-rendered');
+        if (contentEl) {
+          contentEl.innerHTML = renderMarkdown(item.content || '');
+        }
+        const modalTs = item.time_created || item.created_at;
+        document.getElementById('modal-time').innerText = `录入时间: ${modalTs ? new Date(Number(modalTs)).toLocaleString('zh-CN', { hour12: false }) : '-'}`;
 
         document.getElementById('detail-modal').classList.remove('hidden');
       } catch (e) {
@@ -756,8 +916,8 @@
               <td class="px-5 py-2.5 text-slate-500 whitespace-nowrap">${timeStr}</td>
               <td class="px-5 py-2.5 font-semibold text-slate-800">${log.caller || 'opencode'}</td>
               <td class="px-5 py-2.5 text-emerald-700 font-bold">${log.tool_name}</td>
-              <td class="px-5 py-2.5 text-slate-800 truncate max-w-xs" title="${log.query_text || ''}">${log.query_text || '-'}</td>
-              <td class="px-5 py-2.5 text-right text-slate-700">${log.hit_count !== null ? log.hit_count : '-'}</td>
+              <td class="px-5 py-2.5 text-slate-800 truncate max-w-xs" title="${log.query_summary || log.query_text || ''}">${log.query_summary || log.query_text || '-'}</td>
+              <td class="px-5 py-2.5 text-right text-slate-700">${log.hits_count !== undefined && log.hits_count !== null ? log.hits_count : (log.hit_count !== undefined && log.hit_count !== null ? log.hit_count : '-')}</td>
               <td class="px-5 py-2.5 text-right text-blue-600 font-medium">${log.duration_ms}ms</td>
             </tr>
           `;

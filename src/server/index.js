@@ -312,6 +312,7 @@ export function createWebServer() {
           const offset = Math.max(Number(parsedUrl.searchParams.get('offset')) || 0, 0);
 
           const logs = getMcpAuditLogs({
+            tool,
             toolName: tool,
             limit,
             offset
